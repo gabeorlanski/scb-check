@@ -1,0 +1,412 @@
+---
+id: pointless-lambda-call
+language: python
+severity: warning
+message: "Immediately-invoked lambda `(lambda: ...)()` - inline the expression"
+metadata:
+  weight: 3
+  category: slop
+rule:
+  kind: call
+  has:
+    kind: parenthesized_expression
+    has:
+      kind: lambda
+---
+id: unnecessary-lambda
+language: python
+severity: warning
+message: "`lambda x: f(x)` - pass `f` directly"
+metadata:
+  weight: 2
+  category: slop
+rule:
+  kind: lambda
+  pattern: 'lambda $ARG: $FN($ARG)'
+---
+id: empty-init
+language: python
+severity: warning
+message: "Empty `__init__` - delete it, Python provides a default constructor"
+metadata:
+  weight: 2
+  category: slop
+rule:
+  kind: function_definition
+  all:
+  - has:
+      kind: identifier
+      regex: ^__init__$
+  - has:
+      kind: block
+      has:
+        kind: pass_statement
+---
+id: redundant-return-none
+language: python
+severity: warning
+message: "`return None` at end of function - drop it, `None` returns implicitly"
+metadata:
+  weight: 2
+  category: slop
+rule:
+  kind: return_statement
+  pattern: return None
+  inside:
+    kind: block
+    inside:
+      kind: function_definition
+  not:
+    precedes:
+      stopBy: neighbor
+      any:
+      - kind: expression_statement
+      - kind: return_statement
+      - kind: if_statement
+      - kind: for_statement
+      - kind: while_statement
+      - kind: try_statement
+      - kind: with_statement
+      - kind: raise_statement
+---
+id: swallow-exception-pass-multi-stmt
+language: python
+severity: warning
+message: "`except ...: pass` after multi-step work hides real failures; catch specific errors or log"
+metadata:
+  weight: 4
+  category: slop
+rule:
+  any:
+  - pattern: |
+      try:
+        $FIRST
+        $SECOND
+        $$$REST
+      except Exception:
+        pass
+  - pattern: |
+      try:
+        $FIRST
+        $SECOND
+        $$$REST
+      except Exception as $ERR:
+        pass
+  - pattern: |
+      try:
+        $FIRST
+        $SECOND
+        $$$REST
+      except:
+        pass
+---
+id: tokenizer-char-append-branch
+language: python
+severity: warning
+message: "Per-char tokenizer branches with `append` + `pos += 1` - use `{char: TokenType}` lookup table"
+metadata:
+  weight: 4
+  category: slop
+rule:
+  kind: expression_statement
+  has:
+    pattern: $OBJ.tokens.append($NEW_TOKEN)
+  precedes:
+    kind: expression_statement
+    has:
+      pattern: $OBJ.pos += 1
+---
+id: except-bare-reraise
+language: python
+severity: warning
+message: Catching an exception only to re-raise it adds noise; drop the try/except
+metadata:
+  weight: 3
+  category: slop
+rule:
+  kind: except_clause
+  has:
+    kind: block
+    regex: "^\\s*raise\\s*$"
+---
+id: except-pass-silence
+language: python
+severity: warning
+message: except clause with bare pass silently swallows errors
+metadata:
+  weight: 4
+  category: slop
+rule:
+  kind: except_clause
+  has:
+    kind: block
+    has:
+      kind: pass_statement
+---
+id: except-oserror-ioerror-pair
+language: python
+severity: warning
+message: IOError is an alias for OSError since Py3.3; drop the pair
+metadata:
+  weight: 2
+  category: slop
+rule:
+  kind: except_clause
+  regex: "\\(OSError,\\s*IOError\\)|\\(IOError,\\s*OSError\\)"
+---
+id: pragma-no-cover-defensive
+language: python
+severity: warning
+message: pragma no cover suppresses coverage on dead branches; remove the branch instead
+metadata:
+  weight: 3
+  category: slop
+rule:
+  kind: comment
+  regex: "pragma:\\s*no\\s+cover"
+---
+id: per-method-assert-not-none
+language: python
+severity: hint
+message: assert self.X is not None at method entry - enforce in __init__ once
+metadata:
+  weight: 2
+  category: slop
+rule:
+  kind: assert_statement
+  pattern: "assert self.$F is not None"
+---
+id: del-unused-param
+language: python
+severity: warning
+message: del on a named parameter inside a function silences unused-param lint - drop from signature
+metadata:
+  weight: 3
+  category: slop
+rule:
+  kind: delete_statement
+  not:
+    has:
+      any:
+      - kind: subscript
+      - kind: attribute
+      - kind: call
+  inside:
+    kind: function_definition
+    stopBy: end
+---
+id: wrapper-isvalid-oneliner
+language: python
+severity: hint
+message: One-line is_valid_X wrapping a regex match/search/fullmatch adds no value
+metadata:
+  weight: 2
+  category: slop
+rule:
+  kind: function_definition
+  all:
+  - has:
+      kind: identifier
+      regex: "^is_valid"
+  - has:
+      kind: block
+      has:
+        kind: return_statement
+        regex: "bool\\(.*\\.(match|fullmatch|search)\\("
+---
+id: manual-removeprefix-replace
+language: python
+severity: warning
+message: s.replace(p, '') if s.startswith(p) else s - use str.removeprefix
+metadata:
+  weight: 3
+  category: slop
+rule:
+  pattern: "$S.replace($P, $EMPTY) if $S.startswith($P) else $S"
+---
+id: section-banner-comment
+language: python
+severity: warning
+message: Decorative section banner comment - delete, let structure speak for itself
+metadata:
+  weight: 2
+  category: slop
+rule:
+  kind: comment
+  regex: "^#\\s*[-=─]{10,}\\s*$"
+---
+id: dataclass-count-explosion
+language: python
+severity: hint
+message: "@dataclass decorator - 10+ in one file suggests TypedDict or consolidation target"
+metadata:
+  weight: 2
+  category: slop
+  min_file_count: 10
+rule:
+  kind: decorator
+  regex: "^@dataclass"
+---
+id: dataclass-few-attributes
+language: python
+severity: hint
+message: "@dataclass with <=2 scalar attributes - use a NamedTuple or tuple unless you need mutability"
+metadata:
+  weight: 2
+  category: slop
+rule:
+  kind: class_definition
+  all:
+  - inside:
+      kind: decorated_definition
+      stopBy: neighbor
+      has:
+        kind: decorator
+        regex: "^@dataclass"
+  - has:
+      kind: block
+      all:
+      - not:
+          has:
+            nthChild:
+              position: 3
+      - not:
+          has:
+            stopBy: end
+            kind: generic_type
+---
+id: dataclass-tagged-union-discriminator
+language: python
+severity: hint
+message: "@dataclass with `kind: str` + multiple Optional fields - model as distinct types or a Literal discriminator"
+metadata:
+  weight: 3
+  category: slop
+rule:
+  any:
+  - pattern: |
+      @dataclass
+      class $C:
+          $K: str
+          $N1: Optional[$$$T1] = $$$D1
+          $N2: Optional[$$$T2] = $$$D2
+  - pattern: |
+      @dataclass
+      class $C:
+          $K: str
+          $N1: Optional[$$$T1] = $$$D1
+          $N2: Optional[$$$T2] = $$$D2
+          $$$REST
+  - pattern: |
+      @dataclass($$$A)
+      class $C:
+          $K: str
+          $N1: Optional[$$$T1] = $$$D1
+          $N2: Optional[$$$T2] = $$$D2
+  - pattern: |
+      @dataclass($$$A)
+      class $C:
+          $K: str
+          $N1: Optional[$$$T1] = $$$D1
+          $N2: Optional[$$$T2] = $$$D2
+          $$$REST
+constraints:
+  K:
+    regex: "^(kind|type|tag)$"
+---
+id: empty-exception-subclass
+language: python
+severity: warning
+message: "Empty Error/Exception/Warning subclass - use one base error and pass context in the message"
+metadata:
+  weight: 2
+  category: slop
+rule:
+  kind: class_definition
+  all:
+  - has:
+      kind: argument_list
+      regex: "(Error|Exception|Warning)"
+  - not:
+      has:
+        kind: function_definition
+        stopBy: end
+  - not:
+      has:
+        kind: decorated_definition
+        stopBy: end
+        has:
+          kind: function_definition
+---
+id: identity-wrapper-function
+language: python
+severity: hint
+message: "`def f(x): return g(x)` - identity wrapper adds no value; call the inner function directly"
+metadata:
+  weight: 2
+  category: slop
+rule:
+  any:
+  - pattern: |
+      def $NAME($ARG):
+          return $CALL($ARG)
+  - pattern: |
+      def $NAME($ARG) -> $T2:
+          return $CALL($ARG)
+  - pattern: |
+      def $NAME($ARG: $T1):
+          return $CALL($ARG)
+  - pattern: |
+      def $NAME($ARG: $T1) -> $T2:
+          return $CALL($ARG)
+  not:
+    inside:
+      kind: decorated_definition
+      stopBy: neighbor
+---
+id: predicate-isinstance-wrapper
+language: python
+severity: hint
+message: "`def is_X(v) -> bool: return isinstance(v, T)` - inline the isinstance check; the wrapper adds no value"
+metadata:
+  weight: 2
+  category: slop
+rule:
+  any:
+  - pattern: |
+      def $NAME($ARG) -> bool:
+          return isinstance($ARG, $T)
+  - pattern: |
+      def $NAME($ARG: $_) -> bool:
+          return isinstance($ARG, $T)
+---
+id: lambda-generator-throw
+language: python
+severity: warning
+message: "`(_ for _ in ()).throw(...)` - raise inside a lambda via generator hack; use `def helper(): raise ...`"
+metadata:
+  weight: 4
+  category: slop
+rule:
+  pattern: "(_ for _ in ()).throw($_)"
+---
+id: oswalk-relpath-sep-replace
+language: python
+severity: warning
+message: "`os.walk` + `os.path.relpath` + `.replace(os.sep, '/')` - use `Path(root).rglob('*')` and `.relative_to(root).as_posix()`"
+metadata:
+  weight: 3
+  category: slop
+rule:
+  kind: for_statement
+  all:
+  - has:
+      kind: call
+      stopBy: end
+      regex: "os\\.walk"
+  - has:
+      stopBy: end
+      regex: "os\\.path\\.relpath"
+  - has:
+      stopBy: end
+      regex: "\\.replace\\(os\\.sep"

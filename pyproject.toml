@@ -1,0 +1,96 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "scb-check"
+version = "0.1.0"
+description = "ASAP MVP for SCBench verbosity and erosion metrics"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = [
+    "ast-grep-cli>=0.42.1",
+    "typer>=0.16.0",
+    "structlog>=25.4.0",
+    "tree-sitter>=0.25.0",
+    "tree-sitter-python>=0.25.0",
+    "pyyaml>=6.0.2",
+]
+
+[project.scripts]
+scb-check = "scb_check.cli:main"
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.6.0",
+    "pytest>=8.4.2",
+    "pytest-snapshot>=0.9.0",
+    "ruff>=0.14.3",
+    "ty>=0.0.14",
+    "vulture>=2.16",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/scb_check"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/scb_check/resources/slop_rules" = "scb_check/resources/slop_rules"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+addopts = "-q"
+markers = [
+    "integration: integration tests that require external tools",
+]
+
+[tool.ty.src]
+exclude = ["tests/fixtures/"]
+
+[tool.ruff]
+exclude = [".venv", ".gitignore", ".dockerignore"]
+line-length = 80
+target-version = "py312"
+extend-exclude = ["tests/fixtures/", ".venv/*", ".pytest_cache/*"]
+show-fixes = true
+
+[tool.ruff.lint.isort]
+case-sensitive = true
+force-single-line = true
+single-line-exclusions = ["typing"]
+
+[tool.ruff.lint]
+select = [
+    "I",
+    "F",
+    "W",        # PyCodeStyle warnings
+    "E",        # PyCodeStyle errors
+    "UP",       # Warn if certain things can changed due to newer Python versions
+    "C4",       # Catch incorrect use of comprehensions, dict, list, etc
+    "FA",       # Enforce from __future__ import annotations
+    "ISC",      # Good use of string concatenation
+    "ICN",      # Use common import conventions
+    "RET",      # Good return practices
+    "SIM",      # Common simplification rules
+    "TID",      # Some good import practices
+    "TC",       # Enforce importing certain types in a TYPE_CHECKING block
+    "PTH",      # Use pathlib instead of os.path
+    "TD",       # Be diligent with TODO comments
+    "NPY",      # Some numpy-specific things
+    "A",   # detect shadowed builtins
+    "BLE", # disallow catch-all exceptions
+    "S",   # disallow things like "exec"
+    "FBT", # detect boolean traps
+    "N",   # enforce naming conventions, e.g. ClassName vs function_name
+]
+ignore = [
+    "TC001",
+    "TC003",
+    "E501",
+    "C408",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"**/__init__.py" = ["E402"]
+"!src/**.py" = ["D"]
+"tests/**.py" = ["S101"]

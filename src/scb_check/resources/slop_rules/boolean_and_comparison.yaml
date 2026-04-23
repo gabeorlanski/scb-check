@@ -1,0 +1,220 @@
+---
+id: chained-comparison-opportunity
+language: python
+severity: warning
+message: "`a < b and b < c` - use chained form `a < b < c`"
+metadata:
+  weight: 3
+  category: slop
+rule:
+  kind: boolean_operator
+  any:
+  - pattern: $A < $B and $B < $C
+  - pattern: $A > $B and $B > $C
+  - pattern: $A <= $B and $B <= $C
+  - pattern: $A >= $B and $B >= $C
+  - pattern: $A < $B and $B <= $C
+  - pattern: $A <= $B and $B < $C
+  - pattern: $A > $B and $B >= $C
+  - pattern: $A >= $B and $B > $C
+---
+id: bool-comparison
+language: python
+severity: warning
+message: "`x == True` / `x == False` - use `if x:` / `if not x:`"
+metadata:
+  weight: 2
+  category: slop
+rule:
+  kind: comparison_operator
+  regex: ==\s*(True|False)
+---
+id: chained-none-check
+language: python
+severity: warning
+message: "`x is not None and y is not None` - use `all(v is not None for v in (x, y))` or try/except"
+metadata:
+  weight: 2
+  category: slop
+rule:
+  kind: boolean_operator
+  regex: is not None\s+(and|or)\s+\w+\s+is not None
+---
+id: empty-string-or
+language: python
+severity: warning
+message: "`x == '' or ...` - use `not x` to catch empty string via truthiness"
+metadata:
+  weight: 2
+  category: slop
+rule:
+  kind: boolean_operator
+  regex: ==\s*(""|'')\s+(or|and)
+---
+id: explicit-bool-cast
+language: python
+severity: warning
+message: "`bool(x)` - drop it, use truthiness directly in `if`/`and`/`or`"
+metadata:
+  weight: 2
+  category: slop
+rule:
+  kind: call
+  has:
+    kind: identifier
+    regex: ^bool$
+---
+id: pointless-bool-cast
+language: python
+severity: warning
+message: "`if bool(x):` - drop `bool()`, `if` already tests truthiness"
+metadata:
+  weight: 3
+  category: slop
+rule:
+  kind: if_statement
+  pattern: "if bool($COND):\n  $$$\n"
+---
+id: redundant-bool-in-condition
+language: python
+severity: warning
+message: "`bool(x)` inside `if`/`and`/`or` - drop it, these already test truthiness"
+metadata:
+  weight: 3
+  category: slop
+rule:
+  kind: if_statement
+  has:
+    kind: boolean_operator
+    has:
+      kind: call
+      pattern: bool($X)
+---
+id: redundant-bool-ternary
+language: python
+severity: warning
+message: "`True if x else False` - use `bool(x)` (or just `x` if already boolean)"
+metadata:
+  weight: 2
+  category: slop
+rule:
+  kind: conditional_expression
+  regex: True\s+if.*else\s+False|False\s+if.*else\s+True
+---
+id: redundant-none-empty-check
+language: python
+severity: warning
+message: "`x is not None and x != ''` - use `if x:` (empty string is also falsy)"
+metadata:
+  weight: 2
+  category: slop
+rule:
+  kind: boolean_operator
+  regex: is not None.*(!=\s*""|len\(|==\s*""|!=\s*''|==\s*'')
+---
+id: len-as-condition
+language: python
+severity: warning
+message: "`len(x) == 0` - use `if not x:` (or `if x:` for `> 0`)"
+metadata:
+  weight: 3
+  category: slop
+rule:
+  kind: comparison_operator
+  all:
+  - has:
+      kind: call
+      has:
+        kind: identifier
+        regex: ^len$
+  - has:
+      kind: integer
+      pattern: '0'
+---
+id: len-comparison
+language: python
+severity: warning
+message: "`len(x) > 0` / `len(x) != 0` - use `if x:`"
+metadata:
+  weight: 2
+  category: slop
+rule:
+  kind: comparison_operator
+  has:
+    kind: call
+    regex: ^len\(
+  regex: (>\s*0|!=\s*0|>=\s*1)
+---
+id: type-equality
+language: python
+severity: warning
+message: "`type(x) == T` - use `isinstance(x, T)` (handles subclasses)"
+metadata:
+  weight: 2
+  category: slop
+rule:
+  kind: comparison_operator
+  has:
+    kind: call
+    regex: ^type\(
+---
+id: multiple-isinstance-or
+language: python
+severity: warning
+message: "`isinstance(x, A) or isinstance(x, B)` - use `isinstance(x, (A, B))`"
+metadata:
+  weight: 2
+  category: slop
+rule:
+  kind: boolean_operator
+  pattern: isinstance($X, $T1) or isinstance($X, $T2)
+---
+id: isinstance-bool-exclusion
+language: python
+severity: warning
+message: "`isinstance(x, bool)` - `bool` is an `int` subclass; reconsider whether you want type-specific handling"
+metadata:
+  weight: 2
+  category: slop
+rule:
+  kind: call
+  regex: isinstance\([^,]+,\s*bool\)
+---
+id: is-true-false-strict
+language: python
+severity: warning
+message: is True / is False identity check - use truthiness
+metadata:
+  weight: 2
+  category: slop
+rule:
+  kind: comparison_operator
+  any:
+  - pattern: $X is True
+  - pattern: $X is False
+  - pattern: $X is not True
+  - pattern: $X is not False
+---
+id: bool-numeric-triple-guard
+language: python
+severity: warning
+message: isinstance bool guard combined with numeric isinstance - wrap in helper rather than inlining
+metadata:
+  weight: 3
+  category: slop
+rule:
+  kind: boolean_operator
+  regex: "isinstance\\([^,]+,\\s*bool\\).*isinstance"
+---
+id: mutual-isinstance-or-and
+language: python
+severity: warning
+message: "`isinstance(a, T) or isinstance(b, T): return isinstance(a, T) and isinstance(b, T) and ...` - lift `type(a) is type(b) is T` or an early-return guard"
+metadata:
+  weight: 3
+  category: slop
+rule:
+  kind: if_statement
+  pattern: |
+    if isinstance($L, $T) or isinstance($R, $T):
+        return isinstance($L, $T) and isinstance($R, $T) and $BODY

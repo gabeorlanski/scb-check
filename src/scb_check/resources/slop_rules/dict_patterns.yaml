@@ -1,0 +1,487 @@
+---
+id: chained-dict-get
+language: python
+severity: warning
+message: "`.get().get()` chain - extract helper or use `operator.itemgetter` / try-except KeyError"
+metadata:
+  weight: 3
+  category: slop
+rule:
+  kind: call
+  has:
+    kind: attribute
+    has:
+      kind: call
+      has:
+        kind: attribute
+        regex: \.get$
+    regex: \.get$
+---
+id: repeated-dict-key-assignment
+language: python
+severity: warning
+message: "Repeated `d[k] = f(...)` lines - use a loop or dict comprehension"
+metadata:
+  weight: 3
+  category: slop
+rule:
+  kind: expression_statement
+  has:
+    kind: assignment
+    pattern: $DICT[$KEY] = $FUNC($$$)
+  follows:
+    kind: expression_statement
+    has:
+      kind: assignment
+      pattern: $DICT[$KEY2] = $FUNC($$$)
+---
+id: dict-get-zero-default
+language: python
+severity: warning
+message: "`d.get(k, 0)` - use a defaultdict(int) instead or a try/except KeyError guard."
+metadata:
+  weight: 3
+  category: slop
+rule:
+  kind: call
+  all:
+  - has:
+      kind: attribute
+      regex: \.get$
+  - has:
+      kind: argument_list
+      has:
+        kind: integer
+        regex: ^0$
+        nthChild:
+          position: 2
+---
+id: dict-get-empty-string-default
+language: python
+severity: warning
+message: "`x = d.get(k, ''); if x:` - conflates missing key with empty value; use `.get(k)` and `is not None`"
+metadata:
+  weight: 3
+  category: slop
+rule:
+  kind: expression_statement
+  pattern: $X = $D.get($K, "")
+  precedes:
+    kind: if_statement
+    pattern: |
+      if $X:
+          $$$BODY
+---
+id: dict-get-empty-list-default
+language: python
+severity: warning
+message: "`d.get(k, [])` - builds a fresh list each call; use `d.setdefault(k, [])` or `defaultdict(list)`"
+metadata:
+  weight: 3
+  category: slop
+rule:
+  kind: call
+  all:
+  - has:
+      kind: attribute
+      regex: \.get$
+  - has:
+      kind: argument_list
+      has:
+        kind: list
+        not:
+          has:
+            any:
+            - kind: identifier
+            - kind: integer
+            - kind: string
+        nthChild:
+          position: 2
+---
+id: dict-get-empty-dict-default
+language: python
+severity: warning
+message: "`d.get(k, {})` - builds a fresh dict each call; use `d.setdefault(k, {})` or `defaultdict(dict)`"
+metadata:
+  weight: 3
+  category: slop
+rule:
+  kind: call
+  all:
+  - has:
+      kind: attribute
+      regex: \.get$
+  - has:
+      kind: argument_list
+      has:
+        kind: dictionary
+        not:
+          has:
+            kind: pair
+        nthChild:
+          position: 2
+---
+id: dict-get-default-none
+language: python
+severity: warning
+message: "`d.get(k, None)` - drop the `None`, it is already the default"
+metadata:
+  weight: 2
+  category: slop
+rule:
+  kind: call
+  all:
+  - has:
+      kind: attribute
+      regex: \.get$
+  - has:
+      kind: argument_list
+      has:
+        kind: none
+        nthChild:
+          position: 2
+---
+id: check-key-in-dict-keys
+language: python
+severity: warning
+message: "`k in d.keys()` - use `k in d`"
+metadata:
+  weight: 3
+  category: slop
+rule:
+  kind: comparison_operator
+  regex: \sin\s
+  has:
+    kind: call
+    has:
+      kind: attribute
+      regex: \.keys$
+---
+id: list-dict-keys
+language: python
+severity: warning
+message: "`list(d.keys())` - use `list(d)`"
+metadata:
+  weight: 3
+  category: slop
+rule:
+  kind: call
+  all:
+  - has:
+      kind: identifier
+      regex: ^list$
+  - has:
+      kind: argument_list
+      has:
+        kind: call
+        has:
+          kind: attribute
+          regex: \.keys$
+---
+id: manual-dict-setdefault
+language: python
+severity: warning
+message: "`if k not in d: d[k] = v` - use `d.setdefault(k, v)`"
+metadata:
+  weight: 2
+  category: slop
+rule:
+  any:
+  - pattern: |
+      if $K not in $D:
+          $D[$K] = $V
+  - pattern: "if $K not in $D: $D[$K] = $V"
+---
+id: verbose-dict-key-access
+language: python
+severity: warning
+message: "`if k in d: v = d[k]` - use `v = d.get(k)` (or `d.get(k, default)`)"
+metadata:
+  weight: 2
+  category: slop
+rule:
+  kind: if_statement
+  pattern: "if \"$KEY\" in $DICT:\n    $VAR = $DICT[\"$KEY\"]\n"
+---
+id: verbose-dict-update
+language: python
+severity: warning
+message: "Single-statement `d[k] = v` loop - use `{k: v for ... in ...}` comprehension"
+metadata:
+  weight: 4
+  category: slop
+rule:
+  any:
+  - pattern: |
+      for $V in $IT:
+          $D[$K] = $EXPR
+  - pattern: |
+      for $V in $IT:
+          if $COND:
+              continue
+          $D[$K] = $EXPR
+  - pattern: |
+      for $V in $IT:
+          if $COND:
+              $D[$K] = $EXPR
+---
+id: verbose-dict-elif-updates
+language: python
+severity: warning
+message: "`d[k] = v` in each if/elif branch - use a dispatch `{cond: (k, v)}` or helper"
+metadata:
+  weight: 4
+  category: slop
+rule:
+  pattern: "if $COND1:\n  $$$PRE1\n  $D[$KEY1] = $VAL1\n  $$$POST1\nelif $COND2:\n\
+    \  $$$PRE2\n  $D[$KEY2] = $VAL2\n  $$$POST2\n"
+---
+id: verbose-dict-iteration
+language: python
+severity: warning
+message: "`for k in d.keys()` - use `for k in d`"
+metadata:
+  weight: 4
+  category: slop
+rule:
+  kind: for_statement
+  pattern: "for $KEY in $DICT.keys():\n    $$$BODY\n"
+---
+id: items-unused-value
+language: python
+severity: warning
+message: "`for k, _ in d.items()` - use `for k in d`"
+metadata:
+  weight: 4
+  category: slop
+rule:
+  kind: for_statement
+  pattern: "for $KEY, _ in $DICT.items():\n    $$$BODY\n"
+---
+id: items-unused-key
+language: python
+severity: warning
+message: "`for _, v in d.items()` - use `for v in d.values()`"
+metadata:
+  weight: 4
+  category: slop
+rule:
+  kind: for_statement
+  pattern: "for _, $VAL in $DICT.items():\n    $$$BODY\n"
+---
+id: manual-dict-get-assign
+language: python
+severity: warning
+message: "`if k in d: v = d[k] else: v = default` - use `v = d.get(k, default)`"
+metadata:
+  weight: 4
+  category: slop
+rule:
+  pattern: "if $KEY in $DICT:\n    $OUT = $DICT[$KEY]\nelse:\n    $OUT = $DEFAULT\n"
+---
+id: manual-dict-counter-if-else
+language: python
+severity: warning
+message: "Manual dict counter - use `d[k] = d.get(k, 0) + 1` or `collections.Counter(iterable)`"
+metadata:
+  weight: 4
+  category: slop
+rule:
+  any:
+  - pattern: "if $KEY in $DICT:\n    $DICT[$KEY] += 1\nelse:\n    $DICT[$KEY] = 1\n"
+  - pattern: "$DICT[$KEY] = $DICT.get($KEY, 0) + 1"
+---
+id: sorted-dict-keys-wrap
+language: python
+severity: warning
+message: "`sorted(d.keys())` - use `sorted(d)`"
+metadata:
+  weight: 4
+  category: slop
+rule:
+  pattern: sorted($DICT.keys())
+---
+id: sorted-key-indexed-dict-comprehension
+language: python
+severity: warning
+message: "`{k: d[k] for k in sorted(d.keys())}` - use `dict(sorted(d.items()))`"
+metadata:
+  weight: 4
+  category: slop
+rule:
+  any:
+  - pattern: '{$K: $DICT[$K] for $K in sorted($DICT.keys())}'
+  - pattern: '{$K: $F($DICT[$K]) for $K in sorted($DICT.keys())}'
+---
+id: dict-comprehension-from-keys
+language: python
+severity: warning
+message: "`dict.fromkeys(keys, val)` - use `{k: val for k in keys}` (and never with a mutable `val`, it is shared)"
+metadata:
+  weight: 2
+  category: slop
+rule:
+  kind: call
+  pattern: dict.fromkeys($KEYS, $VAL)
+---
+id: dict-get-default-inside-keyerror-try
+language: python
+severity: warning
+message: "`d.get(k, default)` inside `try/except KeyError` - the default is unreachable; drop it or drop the except"
+metadata:
+  weight: 4
+  category: slop
+rule:
+  kind: call
+  all:
+  - pattern: $D.get($K, $DEFAULT)
+  - inside:
+      stopBy: end
+      kind: try_statement
+      has:
+        kind: except_clause
+        regex: KeyError
+---
+id: deep-dict-access
+language: python
+severity: warning
+message: "4+ levels of `d[a][b][c][d]` - use a dataclass or `operator.itemgetter`"
+metadata:
+  weight: 3
+  category: slop
+rule:
+  kind: subscript
+  has:
+    kind: subscript
+    has:
+      kind: subscript
+      has:
+        kind: subscript
+---
+id: get-then-none-check
+language: python
+severity: warning
+message: "`v = d.get(k); if v is None:` - use `if k in d:` or try/except KeyError"
+metadata:
+  weight: 2
+  category: slop
+rule:
+  kind: if_statement
+  all:
+  - pattern: |
+      if $V is None:
+          $$$BODY
+  - follows:
+      stopBy: neighbor
+      kind: expression_statement
+      has:
+        pattern: $V = $D.get($K)
+---
+id: init-populate-iterate-dict
+language: python
+severity: hint
+message: "Create-populate-iterate `$DICT` - use `{k: v for ...}` or skip the intermediate dict"
+note: 'Consider refactoring to:
+
+  1. Dict comprehension: {key: val for item in items}
+
+  2. Helper function: def build_lookup(items) -> dict
+
+  3. Inline the logic if the intermediate dict isn''t needed elsewhere
+
+  '
+metadata:
+  weight: 4
+  category: slop
+rule:
+  pattern: "for $VARS in $DICT.$METHOD():\n    $$$BODY\n"
+  follows:
+    all:
+    - kind: for_statement
+    - has:
+        kind: subscript
+        all:
+        - has:
+            kind: identifier
+            field: value
+            pattern: $DICT
+        - inside:
+            kind: assignment
+            field: left
+        stopBy: end
+    - follows:
+        kind: expression_statement
+        has:
+          kind: assignment
+          all:
+          - has:
+              kind: identifier
+              field: left
+              pattern: $DICT
+          - has:
+              kind: dictionary
+              field: right
+              not:
+                has:
+                  kind: pair
+        stopBy:
+          kind: for_statement
+    stopBy: end
+constraints:
+  METHOD:
+    regex: ^(items|keys|values)$
+---
+id: sorted-items-default-key
+language: python
+severity: warning
+message: "sorted(..., key=lambda i: i[0]) / `(i[0], i[1])` - default sort already matches; drop the key"
+metadata:
+  weight: 3
+  category: slop
+rule:
+  any:
+  - pattern: "sorted($D.items(), key=lambda $I: $I[0])"
+  - pattern: "sorted($XS, key=lambda $I: ($I[0], $I[1]))"
+  - pattern: "sorted($XS, key=lambda $I: ($I[0], $I[1], $I[2]))"
+---
+id: identity-dict-comprehension
+language: python
+severity: warning
+message: "{k: v for k, v in d.items()} is just dict(d)"
+metadata:
+  weight: 3
+  category: slop
+rule:
+  pattern: "{$K: $V for $K, $V in $D.items()}"
+---
+id: dict-from-pairs-loop
+language: python
+severity: warning
+message: "`for k, v in pairs: d[k] = v` - use `d = dict(pairs)` (or `d.update(pairs)` if merging)"
+metadata:
+  weight: 3
+  category: slop
+rule:
+  pattern: |
+    for $K, $V in $PAIRS:
+        $D[$K] = $V
+---
+id: update-if-present-dict
+language: python
+severity: warning
+message: "`if x is not None: updates[k] = x` for each arg - drop the optional defaulting or pass `**kwargs` through"
+metadata:
+  weight: 3
+  category: slop
+rule:
+  kind: if_statement
+  all:
+  - pattern: |
+      if $A is not None:
+          $U[$K1] = $A
+  - precedes:
+      stopBy: neighbor
+      kind: if_statement
+      pattern: |
+        if $B is not None:
+            $U[$K2] = $B

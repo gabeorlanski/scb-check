@@ -1,0 +1,635 @@
+---
+id: comprehension-used-but-ignored-result
+language: python
+severity: warning
+message: "Comprehension result discarded - use a `for` loop for side effects"
+metadata:
+  weight: 3
+  category: slop
+rule:
+  kind: expression_statement
+  has:
+    any:
+    - kind: list_comprehension
+    - kind: set_comprehension
+    - kind: dictionary_comprehension
+    - kind: generator_expression
+---
+id: for-range-len
+language: python
+severity: warning
+message: "`for i in range(len(x))` - use `enumerate(x)` or iterate `x` directly"
+metadata:
+  weight: 3
+  category: slop
+rule:
+  pattern: "for $I in range(len($SEQ)):\n  $$$\n"
+---
+id: unnecessary-list-call
+language: python
+severity: warning
+message: "`for x in list(iterable)` - drop `list()`, `for` iterates directly"
+metadata:
+  weight: 3
+  category: slop
+rule:
+  kind: for_statement
+  has:
+    kind: call
+    has:
+      kind: identifier
+      regex: ^list$
+---
+id: list-map-filter
+language: python
+severity: warning
+message: "`list(map(f, xs))` / `list(filter(p, xs))` - use a list comprehension"
+metadata:
+  weight: 3
+  category: slop
+rule:
+  kind: call
+  all:
+  - has:
+      kind: identifier
+      regex: ^list$
+  - has:
+      kind: argument_list
+      has:
+        kind: call
+        has:
+          kind: identifier
+          regex: ^(map|filter)$
+---
+id: listcomp-in-builtin-call
+language: python
+severity: warning
+message: "`all/any/sum/set/dict([...])` - drop brackets for a generator expression"
+metadata:
+  weight: 3
+  category: slop
+rule:
+  kind: call
+  all:
+  - has:
+      kind: identifier
+      regex: ^(all|any|sum|set|dict)$
+  - has:
+      kind: argument_list
+      has:
+        kind: list_comprehension
+---
+id: membership-test-list-literal
+language: python
+severity: warning
+message: "`x in [a, b, c, d]` - use a set literal `{a, b, c, d}` for O(1) lookup"
+metadata:
+  weight: 3
+  category: slop
+rule:
+  kind: comparison_operator
+  pattern: $X in [$A, $B, $C, $D, $$$REST]
+---
+id: list-wrap-list
+language: python
+severity: warning
+message: "`list([a, b, c])` is redundant - just use `[a, b, c]`"
+metadata:
+  weight: 2
+  category: slop
+rule:
+  pattern: list([$$$ARGS])
+---
+id: set-literal-list
+language: python
+severity: warning
+message: "`set([a, b, c])` - use set literal `{a, b, c}`"
+metadata:
+  weight: 2
+  category: slop
+rule:
+  kind: call
+  all:
+    - has:
+        field: function
+        regex: '^set$'
+    - has:
+        kind: argument_list
+        has:
+          kind: list
+---
+id: list-self-concat
+language: python
+severity: warning
+message: "`lst = lst + [x]` - use `lst.append(x)` (avoids copying the whole list)"
+metadata:
+  weight: 4
+  category: slop
+rule:
+  pattern: $LIST = $LIST + [$ITEM]
+---
+id: list-extend-from-loop
+language: python
+severity: warning
+message: "`for x in it: lst.append(x)` - use `lst.extend(it)`"
+metadata:
+  weight: 4
+  category: slop
+rule:
+  kind: for_statement
+  pattern: "for $ITEM in $ITER:\n    $LIST.append($ITEM)\n"
+---
+id: join-list-literal
+language: python
+severity: warning
+message: "`''.join([...])` materializes a list first - pass the iterable directly"
+metadata:
+  weight: 4
+  category: slop
+rule:
+  kind: call
+  all:
+    - has:
+        kind: attribute
+        regex: \.join$
+    - has:
+        field: arguments
+        has:
+          kind: list_comprehension
+---
+id: join-list-comprehension
+language: python
+severity: warning
+message: "`''.join([x for ...])` - drop brackets for a generator expression"
+metadata:
+  weight: 4
+  category: slop
+rule:
+  kind: call
+  all:
+  - has:
+      kind: attribute
+      regex: \.join$
+  - has:
+      kind: argument_list
+      has:
+        kind: list_comprehension
+---
+id: manual-sum-loop
+language: python
+severity: warning
+message: "`total = 0; for x in it: total += expr` - use `sum(expr for x in it)`"
+metadata:
+  weight: 4
+  category: slop
+rule:
+  kind: for_statement
+  pattern: "for $ITEM in $ITER:\n    $TOTAL += $EXPR\n"
+  follows:
+    kind: expression_statement
+    has:
+      kind: assignment
+      pattern: $TOTAL = 0
+    stopBy: neighbor
+---
+id: manual-count-loop
+language: python
+severity: warning
+message: "`count = 0; for x in it: count += 1` - use `sum(1 for x in it if cond)`"
+metadata:
+  weight: 4
+  category: slop
+rule:
+  kind: for_statement
+  pattern: "for $ITEM in $ITER:\n    $COUNT += 1\n"
+  follows:
+    kind: expression_statement
+    has:
+      kind: assignment
+      pattern: $COUNT = 0
+    stopBy: neighbor
+---
+id: set-add-loop
+language: python
+severity: warning
+message: "`for x in it: s.add(v)` - use set comprehension `{v for x in it}`"
+metadata:
+  weight: 4
+  category: slop
+rule:
+  kind: for_statement
+  pattern: "for $ITEM in $ITER:\n    $SET.add($VAL)\n"
+---
+id: sorted-list-comprehension-wrap
+language: python
+severity: warning
+message: "`sorted([x for ...])` - drop brackets for generator expression `sorted(x for ...)`"
+metadata:
+  weight: 4
+  category: slop
+rule:
+  any:
+  - pattern: sorted([$X for $Y in $ITER])
+  - pattern: sorted([$X for $Y in $ITER if $COND])
+---
+id: set-generator-wrap
+language: python
+severity: warning
+message: "`set(x for x in it)` - use set comprehension `{x for x in it}`"
+metadata:
+  weight: 3
+  category: slop
+rule:
+  any:
+  - pattern: set($X for $Y in $ITER)
+  - pattern: set($X for $Y in $ITER if $COND)
+---
+id: redundant-list-comprehension
+language: python
+severity: warning
+message: "`[x for x in iter]` - use `list(iter)`"
+metadata:
+  weight: 2
+  category: slop
+rule:
+  kind: list_comprehension
+  pattern: '[$X for $X in $ITER]'
+---
+id: list-comprehension-identity
+language: python
+severity: warning
+message: "`[x for x in iter]` identity transform - use `list(iter)` (or `list(filter(pred, iter))` if filtering)"
+metadata:
+  weight: 4
+  category: slop
+rule:
+  kind: list_comprehension
+  pattern: '[$ITEM for $ITEM in $ITER if $COND]'
+  not:
+    has:
+      kind: if_clause
+      has:
+        kind: identifier
+        pattern: $ITEM
+---
+id: consecutive-append-calls
+language: python
+severity: warning
+message: "Consecutive `.append()` calls - use `.extend([a, b, c])`"
+metadata:
+  weight: 4
+  category: slop
+rule:
+  kind: expression_statement
+  has:
+    kind: call
+    has:
+      kind: attribute
+      regex: \.append$
+  follows:
+    kind: expression_statement
+    has:
+      kind: call
+      has:
+        kind: attribute
+        regex: \.append$
+    stopBy: neighbor
+---
+id: verbose-list-append-loop
+language: python
+severity: warning
+message: "Single-statement append loop - use `[expr for ... in ...]` comprehension"
+metadata:
+  weight: 4
+  category: slop
+rule:
+  any:
+  - pattern: |
+      for $V in $IT:
+          $OUT.append($EXPR)
+  - pattern: |
+      for $V in $IT:
+          if $COND:
+              continue
+          $OUT.append($EXPR)
+  - pattern: |
+      for $V in $IT:
+          if $COND:
+              $OUT.append($EXPR)
+---
+id: init-populate-iterate-list
+language: python
+severity: hint
+message: "Create-append-iterate `$LIST` - use `[expr for ...]` or skip the intermediate list"
+note: 'Consider refactoring to:
+
+  1. List comprehension: [val for item in items if cond]
+
+  2. Helper function: def collect_items(source) -> list
+
+  3. Generator expression if only iterating once: (val for item in items)
+
+  '
+metadata:
+  weight: 4
+  category: slop
+rule:
+  kind: for_statement
+  all:
+  # tighten: only suggest this when the consumer loop body is a single statement
+  # (multi-step consumers are often clearer as explicit loops)
+  - pattern: |
+      for $VAR in $LIST:
+          $STMT
+  - has:
+      kind: block
+      all:
+      - not:
+          has:
+            nthChild:
+              position: 2
+      - not:
+          has:
+            any:
+            - kind: if_statement
+            - kind: for_statement
+            - kind: while_statement
+            - kind: try_statement
+            - kind: with_statement
+            - kind: match_statement
+  - not:
+      has:
+        kind: call
+        has:
+          kind: attribute
+          regex: \.(items|keys|values)$
+  - follows:
+      all:
+      - kind: for_statement
+      - has:
+          kind: call
+          has:
+            kind: attribute
+            all:
+            - has:
+                kind: identifier
+                field: object
+                pattern: $LIST
+            - has:
+                field: attribute
+                regex: ^append$
+          stopBy: end
+      - follows:
+          kind: expression_statement
+          has:
+            kind: assignment
+            all:
+            - has:
+                kind: identifier
+                field: left
+                pattern: $LIST
+            - has:
+                kind: list
+                field: right
+                not:
+                  has:
+                    any:
+                    - kind: identifier
+                    - kind: string
+                    - kind: integer
+          stopBy:
+            kind: for_statement
+      stopBy: end
+---
+id: materialize-then-sort-return
+language: python
+severity: warning
+message: "`tmp = [...]; return sorted(tmp)` - use `return sorted(x for ... in ...)`"
+metadata:
+  weight: 4
+  category: slop
+rule:
+  kind: return_statement
+  pattern: return sorted($TMP)
+  follows:
+    kind: expression_statement
+    has:
+      kind: assignment
+      any:
+      - pattern: $TMP = [$X for $Y in $ITER]
+      - pattern: $TMP = [$X for $Y in $ITER if $COND]
+    stopBy: neighbor
+---
+id: manual-find-return-none
+language: python
+severity: warning
+message: "`for x in it: if c: return r; return None` - use `next((r for x in it if c), None)`"
+metadata:
+  weight: 4
+  category: slop
+rule:
+  kind: for_statement
+  pattern: |
+    for $ITEM in $ITER:
+        if $COND:
+            return $RET
+  precedes:
+    kind: return_statement
+    pattern: return None
+    stopBy: neighbor
+---
+id: verbose-missing-remove-loop
+language: python
+severity: warning
+message: "Copy-list-then-remove to find missing items - use `set(required) - set(target)`"
+metadata:
+  weight: 4
+  category: slop
+rule:
+  kind: for_statement
+  pattern: "for $ITEM in $REQ:\n  if $ITEM in $TARGET:\n    $MISSING.remove($ITEM)\n"
+  follows:
+    kind: expression_statement
+    has:
+      pattern: $MISSING = list($REQ)
+    stopBy: end
+---
+id: frozenset-list-wrap
+language: python
+severity: warning
+message: "`frozenset([...])` - pass the iterable directly, drop the list"
+metadata:
+  weight: 4
+  category: slop
+rule:
+  kind: call
+  all:
+  - has:
+      kind: identifier
+      regex: ^frozenset$
+  - has:
+      kind: argument_list
+      has:
+        any:
+        - kind: list
+        - kind: list_comprehension
+---
+id: verbose-range-zero-start
+language: python
+severity: warning
+message: "`range(0, n)` - use `range(n)`, `0` is the default start"
+metadata:
+  weight: 4
+  category: slop
+rule:
+  pattern: range(0, $END)
+---
+id: verbose-sorted-list
+language: python
+severity: warning
+message: "`sorted(list(x))` - use `sorted(x)`, it already returns a new list"
+metadata:
+  weight: 4
+  category: slop
+rule:
+  pattern: sorted(list($X))
+---
+id: redundant-continue
+language: python
+severity: warning
+message: "`continue` at end of loop body - delete it, the loop iterates anyway"
+metadata:
+  weight: 2
+  category: slop
+rule:
+  kind: block
+  regex: continue\s*$
+  inside:
+    any:
+    - kind: for_statement
+    - kind: while_statement
+---
+id: long-tuple-unpacking
+language: python
+severity: warning
+message: "Unpacking 5+ values from a tuple - use a `NamedTuple` or `@dataclass`"
+metadata:
+  weight: 3
+  category: slop
+rule:
+  kind: assignment
+  has:
+    kind: pattern_list
+    has:
+      nthChild:
+        position: 5
+---
+id: manual-index-unpack
+language: python
+severity: warning
+message: "`a = pair[0]; b = pair[1]` - use tuple unpacking `a, b = pair`"
+metadata:
+  weight: 3
+  category: slop
+rule:
+  kind: expression_statement
+  has:
+    kind: assignment
+    pattern: $A = $PAIR[0]
+  precedes:
+    kind: expression_statement
+    has:
+      kind: assignment
+      pattern: $B = $PAIR[1]
+    stopBy: neighbor
+---
+id: split-magic-index
+language: python
+severity: warning
+message: "`s.split()[N]` with magic index - unpack into named vars (`a, b, c = s.split()`)"
+metadata:
+  weight: 3
+  category: slop
+rule:
+  kind: subscript
+  all:
+  - has:
+      kind: call
+      has:
+        kind: attribute
+        regex: \.split$
+  - has:
+      kind: integer
+      regex: ^([2-9]|[1-9][0-9]+)$
+---
+id: slice-assign-listcomp-self
+language: python
+severity: warning
+message: "`lst[:] = [.. for .. in lst]` mutates a list while reading it - prefer assigning a new list unless in-place mutation is required"
+metadata:
+  weight: 3
+  category: slop
+rule:
+  any:
+  - pattern: $LIST[:] = [$VAL for $ITEM in $LIST]
+  - pattern: $LIST[:] = [$VAL for $ITEM in $LIST if $COND]
+---
+id: redundant-blank-check
+language: python
+severity: warning
+message: "`line.isspace() or not line` then `line.strip()` `if not text` - one `if not line.strip(): continue` is enough"
+metadata:
+  weight: 3
+  category: slop
+rule:
+  kind: if_statement
+  pattern: |
+    if $L.isspace() or not $L:
+        continue
+  precedes:
+    stopBy: neighbor
+    kind: expression_statement
+    has:
+      kind: assignment
+      pattern: $T = $L.strip()
+    precedes:
+      stopBy: neighbor
+      kind: if_statement
+      pattern: |
+        if not $T:
+            continue
+---
+id: manual-set-union-loop
+language: python
+severity: hint
+message: "`s = set(); for r in it: s.update(r.X())` - use `set().union(*(r.X() for r in it))` or a comprehension"
+metadata:
+  weight: 2
+  category: slop
+rule:
+  kind: expression_statement
+  has:
+    kind: assignment
+    pattern: $S = set()
+  precedes:
+    stopBy: neighbor
+    kind: for_statement
+    pattern: |
+      for $R in $COLL:
+          $S.update($R.$METHOD())
+---
+id: fixed-chunk-file-hash
+language: python
+severity: warning
+message: "`while True: chunk = f.read(N); if not chunk: break; h.update(chunk)` - use `hashlib.file_digest(f, ALGO)`"
+metadata:
+  weight: 4
+  category: slop
+rule:
+  kind: while_statement
+  pattern: |
+    while True:
+        $CHUNK = $F.read($N)
+        if not $CHUNK:
+            break
+        $H.update($CHUNK)

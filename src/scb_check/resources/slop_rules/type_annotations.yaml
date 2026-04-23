@@ -1,0 +1,126 @@
+---
+id: generic-with-any
+language: python
+severity: warning
+message: "`<Container>[..., Any, ...]` - specify concrete element types or use a `TypedDict`/`@dataclass`/`Protocol`"
+metadata:
+  weight: 2
+  category: slop
+rule:
+  any:
+  - pattern:
+      context: "x: $C[Any]"
+      selector: type
+  - pattern:
+      context: "x: $C[Any, $$$A]"
+      selector: type
+  - pattern:
+      context: "x: $C[$$$A, Any]"
+      selector: type
+  - pattern:
+      context: "x: $C[$$$A, Any, $$$B]"
+      selector: type
+constraints:
+  C:
+    not:
+      any:
+      - regex: "^Union$"
+      - regex: "^Optional$"
+      - regex: "^Callable$"
+---
+id: union-with-any
+language: python
+severity: warning
+message: "`Union[..., Any]` / `... | Any` - drop `Any`, it subsumes every other member"
+metadata:
+  weight: 2
+  category: slop
+rule:
+  any:
+  - pattern:
+      context: "x: Union[Any, $$$A]"
+      selector: type
+  - pattern:
+      context: "x: Union[$$$A, Any]"
+      selector: type
+  - pattern:
+      context: "x: Union[$$$A, Any, $$$B]"
+      selector: type
+  - pattern:
+      context: "x: Any | $T"
+      selector: type
+  - pattern:
+      context: "x: $T | Any"
+      selector: type
+constraints:
+  T:
+    not:
+      regex: "^None$"
+---
+id: optional-any
+language: python
+severity: warning
+message: "`Optional[Any]` / `Any | None` - reduces to `Any`; drop the wrapper"
+metadata:
+  weight: 3
+  category: slop
+rule:
+  any:
+  - pattern:
+      context: "x: Optional[Any]"
+      selector: type
+  - pattern:
+      context: "x: Any | None"
+      selector: type
+  - pattern:
+      context: "x: None | Any"
+      selector: type
+---
+id: callable-any-return
+language: python
+severity: warning
+message: "`Callable[..., Any]` - specify the return type; `...` already erases the parameter signature"
+metadata:
+  weight: 2
+  category: slop
+rule:
+  any:
+  - pattern:
+      context: "x: Callable[..., Any]"
+      selector: type
+  - pattern:
+      context: "x: Callable[$P, Any]"
+      selector: type
+---
+id: object-type-annotation
+language: python
+severity: warning
+message: "`object` annotation - use a concrete type, `Protocol`, or `Any`"
+metadata:
+  weight: 2
+  category: slop
+rule:
+  kind: type
+  any:
+  - regex: ^object$
+  - regex: ^"object"$
+  - regex: ^'object'$
+  - regex: ^builtins\.object$
+---
+id: legacy-typing-capitalized-imports
+language: python
+severity: warning
+message: "Deprecated `typing` import - use built-ins (list/dict/tuple/set/type), `collections.*`, or `X | Y` / `X | None` (PEP 585/604)"
+metadata:
+  weight: 2
+  category: slop
+rule:
+  kind: import_from_statement
+  all:
+  - has:
+      kind: dotted_name
+      regex: "^typing$"
+  - has:
+      stopBy: end
+      kind: dotted_name
+      regex: "^(Dict|List|Optional|Tuple|Union|Set|FrozenSet|Type|DefaultDict|Deque|ChainMap|Counter|OrderedDict)$"
