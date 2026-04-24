@@ -18,30 +18,15 @@ class ConfigError(ValueError):  # scbc ignore[empty-exception-subclass]
 
 
 def load_config(override_path: Path | None, cwd: Path) -> Config:
-    """Load scb-check configuration, walking up from ``cwd``.
-
-    If ``override_path`` is given it must exist. Otherwise ``cwd`` and
-    each parent are searched for ``scb-check.toml`` first, then
-    ``pyproject.toml`` with ``[tool.scb-check]``, ``[tool.ruff]``, or
-    ``[tool.ty.src]``. The walk stops at a ``.git`` directory or the
-    filesystem root; with no match, a default ``Config`` rooted at
-    ``cwd`` is returned. When ``pyproject.toml`` is the source, excludes
-    from the ruff and ty tables are merged into the scb-check excludes.
-    Raises ``ConfigError`` on malformed TOML or invalid values.
-    """
-
-    path = _resolve_config_path(override_path, cwd)
-    if path is None:
-        return Config(exclude=(), base_dir=cwd, context_lines=1)
-    return _parse_config_file(path)
-
-
-def _resolve_config_path(override_path: Path | None, cwd: Path) -> Path | None:
     if override_path is not None:
         if not override_path.exists():
             raise ConfigError(f"config path does not exist: {override_path}")
-        return override_path
-    return _discover_config(cwd)
+        return _parse_config_file(override_path)
+
+    path = _discover_config(cwd)
+    if path is None:
+        return Config(exclude=(), base_dir=cwd, context_lines=1)
+    return _parse_config_file(path)
 
 
 def _discover_config(start: Path) -> Path | None:
@@ -52,7 +37,7 @@ def _discover_config(start: Path) -> Path | None:
             return scb_check_file
 
         pyproject = current / "pyproject.toml"
-        if pyproject.is_file() and _pyproject_has_supported_config(pyproject):
+        if pyproject.is_file() and _has_config(pyproject):
             return pyproject
 
         if (current / ".git").is_dir() or current.parent == current:
@@ -60,7 +45,7 @@ def _discover_config(start: Path) -> Path | None:
         current = current.parent
 
 
-def _pyproject_has_supported_config(path: Path) -> bool:
+def _has_config(path: Path) -> bool:
     data = _load_toml(path)
     tool = data.get("tool")
     raw_ty = tool.get("ty") if isinstance(tool, dict) else None
@@ -75,7 +60,7 @@ def _parse_config_file(path: Path) -> Config:
     payload = _load_toml(path)
 
     if path.name != "pyproject.toml":
-        exclude, context_lines = _validate_scb_check_table(path, payload)
+        exclude, context_lines = _scb_table(path, payload)
         return Config(
             exclude=exclude,
             base_dir=path.parent,
@@ -91,12 +76,11 @@ def _parse_config_file(path: Path) -> Config:
         if raw_scb_check is not None:
             if not isinstance(raw_scb_check, dict):
                 raise ConfigError(f"{path}: [tool.scb-check] must be a table")
-            exclude, context_lines = _validate_scb_check_table(
-                path, raw_scb_check
-            )
+            exclude, context_lines = _scb_table(path, raw_scb_check)
 
-        tool_excludes = _extract_external_tool_excludes(tool)
-        exclude = _merge_excludes(exclude, tool_excludes)
+        exclude = tuple(
+            dict.fromkeys((*exclude, *_tool_excludes(tool)))
+        )
 
     return Config(
         exclude=exclude,
@@ -105,32 +89,30 @@ def _parse_config_file(path: Path) -> Config:
     )
 
 
-def _extract_external_tool_excludes(tool: dict[str, Any]) -> tuple[str, ...]:
+def _tool_excludes(tool: dict[str, Any]) -> tuple[str, ...]:
     patterns: list[str] = []
 
     raw_ruff = tool.get("ruff")
     if isinstance(raw_ruff, dict):
-        patterns.extend(_read_string_list(raw_ruff.get("exclude")))
-        patterns.extend(_read_string_list(raw_ruff.get("extend-exclude")))
+        patterns.extend(_strings(raw_ruff.get("exclude")))
+        patterns.extend(_strings(raw_ruff.get("extend-exclude")))
 
     raw_ty = tool.get("ty")
     if isinstance(raw_ty, dict):
         raw_ty_src = raw_ty.get("src")
         if isinstance(raw_ty_src, dict):
-            patterns.extend(_read_string_list(raw_ty_src.get("exclude")))
+            patterns.extend(_strings(raw_ty_src.get("exclude")))
 
-    return _normalize_tool_patterns(tuple(patterns))
-
-
-def _read_string_list(value: Any) -> tuple[str, ...]:
-    if not isinstance(value, list):
-        return ()
-    if not all(isinstance(entry, str) for entry in value):
-        return ()
-    return tuple(value)
+    return _norm_patterns(tuple(patterns))
 
 
-def _normalize_tool_patterns(patterns: tuple[str, ...]) -> tuple[str, ...]:
+def _strings(value: Any) -> tuple[str, ...]:
+    return tuple(value) if isinstance(value, list) and all(
+        isinstance(entry, str) for entry in value
+    ) else ()
+
+
+def _norm_patterns(patterns: tuple[str, ...]) -> tuple[str, ...]:
     normalized_patterns: list[str] = []
 
     for raw_pattern in patterns:
@@ -143,43 +125,33 @@ def _normalize_tool_patterns(patterns: tuple[str, ...]) -> tuple[str, ...]:
 
         if normalized.endswith("/"):
             normalized_patterns.append(f"{normalized.rstrip('/')}/**")
-            continue
-
-        normalized_patterns.append(normalized)
-        if _is_glob_pattern(normalized) or normalized.endswith(".py"):
-            continue
-        normalized_patterns.append(f"{normalized}/**")
+        elif _is_glob(normalized) or normalized.endswith(".py"):
+            normalized_patterns.append(normalized)
+        else:
+            normalized_patterns.extend((normalized, f"{normalized}/**"))
 
     return tuple(dict.fromkeys(normalized_patterns))
 
 
-def _is_glob_pattern(pattern: str) -> bool:
+def _is_glob(pattern: str) -> bool:
     return any(char in pattern for char in "*?[]")
 
 
-def _merge_excludes(
-    primary: tuple[str, ...],
-    secondary: tuple[str, ...],
-) -> tuple[str, ...]:
-    return tuple(dict.fromkeys((*primary, *secondary)))
-
-
-def _validate_scb_check_table(
+def _scb_table(
     path: Path, table: dict[str, Any]
 ) -> tuple[tuple[str, ...], int]:
-    allowed = {"exclude", "context"}
-    for key in table:
-        if key not in allowed:
-            raise ConfigError(f"{path}: unknown key: {key}")
+    unknown = set(table) - {"exclude", "context"}
+    if unknown:
+        raise ConfigError(f"{path}: unknown key: {min(unknown)}")
 
-    exclude = table.get("exclude", [])
-    if not isinstance(exclude, list):
+    exclude = table.get("exclude", ())
+    if not isinstance(exclude, (list, tuple)):
         raise ConfigError(f"{path}: exclude must be a list")
     if not all(isinstance(entry, str) for entry in exclude):
         raise ConfigError(f"{path}: exclude must be a list of strings")
 
     context = table.get("context", 1)
-    if not isinstance(context, int) or isinstance(context, bool):
+    if not isinstance(context, int):
         raise ConfigError(f"{path}: context must be an integer")
     if context < 0:
         raise ConfigError(f"{path}: context must be >= 0")
@@ -194,10 +166,6 @@ def _load_toml(path: Path) -> dict[str, Any]:
         raise ConfigError(f"{path}: failed to read config") from exc
 
     try:
-        data = tomllib.loads(raw)
+        return tomllib.loads(raw)
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError(f"{path}: invalid TOML: {exc}") from exc
-
-    if not isinstance(data, dict):
-        raise ConfigError(f"{path}: config root must be a table")
-    return data

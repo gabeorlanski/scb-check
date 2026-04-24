@@ -20,4 +20,4 @@ Three layers:
 - **Exit codes**: config errors and path errors exit 2 with a message on stderr; parse failures warn and skip the file.
 - **New CLI command?** Add it under [`commands/`](commands/AGENTS.md), not as a new top-level module.
 - **New module?** Put it in a layer, not here. This directory is for shared boundaries/types — adding more top-level modules blurs the split.
-- **Pipeline helpers stay internal.** `Findings` plus `_build_flags` / `_collect_*_sloc_lines` in `pipeline.py` are implementation details; only `analyze` and `AnalysisResult` are stable entrypoints. If a helper needs reuse elsewhere, move it into a layer first.
+- **Pipeline helpers stay internal.** `Findings` plus `_build_flags` / `_collect_sloc_lines` in `pipeline.py` are implementation details; only `analyze` and `AnalysisResult` are stable entrypoints. If a helper needs reuse elsewhere, move it into a layer first.

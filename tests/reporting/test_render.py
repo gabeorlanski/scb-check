@@ -9,7 +9,7 @@ from scb_check.models import FunctionSymbol
 from scb_check.reporting.render import render_flags
 
 
-def test_render_flags_outputs_expected_templates(tmp_path: Path) -> None:
+def test_01(tmp_path: Path) -> None:
     file_path = tmp_path / "sample.py"
     file_path.write_text(
         "\n".join(
@@ -70,7 +70,7 @@ def test_render_flags_outputs_expected_templates(tmp_path: Path) -> None:
         total_loc_by_file=[(file_path, 5)],
         all_functions=[high_cc],
         clone_sloc_lines_by_file=[(file_path, {2, 3, 4})],
-        ast_grep_sloc_lines_by_file=[(file_path, {5})],
+        ast_sloc_lines_by_file=[(file_path, {5})],
     )
     source_lines = {
         file_path: tuple(file_path.read_text(encoding="utf-8").splitlines())
@@ -92,7 +92,7 @@ def test_render_flags_outputs_expected_templates(tmp_path: Path) -> None:
     assert "complexity: 18, sloc: 32 (threshold: complexity > 10)" in output
 
 
-def test_render_flags_renders_separate_warning_blocks_with_code(
+def test_02(
     tmp_path: Path,
 ) -> None:
     file_path = tmp_path / "sample.py"
@@ -136,7 +136,7 @@ def test_render_flags_renders_separate_warning_blocks_with_code(
     flags = Flags.from_parts(
         ast_grep_hits=[chained, empty_dict],
         total_loc_by_file=[(file_path, 3)],
-        ast_grep_sloc_lines_by_file=[(file_path, {2})],
+        ast_sloc_lines_by_file=[(file_path, {2})],
     )
     source_lines = {
         file_path: tuple(file_path.read_text(encoding="utf-8").splitlines())
@@ -153,7 +153,7 @@ def test_render_flags_renders_separate_warning_blocks_with_code(
     assert "^" not in output
 
 
-def test_render_flags_respects_zero_context(tmp_path: Path) -> None:
+def test_03(tmp_path: Path) -> None:
     file_path = tmp_path / "sample.py"
     file_path.write_text(
         "\n".join(
@@ -179,7 +179,7 @@ def test_render_flags_respects_zero_context(tmp_path: Path) -> None:
     flags = Flags.from_parts(
         ast_grep_hits=[ast_hit],
         total_loc_by_file=[(file_path, 3)],
-        ast_grep_sloc_lines_by_file=[(file_path, {2})],
+        ast_sloc_lines_by_file=[(file_path, {2})],
     )
     source_lines = {
         file_path: tuple(file_path.read_text(encoding="utf-8").splitlines())
@@ -197,7 +197,7 @@ def test_render_flags_respects_zero_context(tmp_path: Path) -> None:
     assert "^" not in output_with_zero
 
 
-def test_render_flags_verbosity_does_not_change_rendered_text(
+def test_04(
     tmp_path: Path,
 ) -> None:
     file_path = tmp_path / "sample.py"
@@ -225,7 +225,7 @@ def test_render_flags_verbosity_does_not_change_rendered_text(
     flags = Flags.from_parts(
         ast_grep_hits=[ast_hit],
         total_loc_by_file=[(file_path, 3)],
-        ast_grep_sloc_lines_by_file=[(file_path, {2})],
+        ast_sloc_lines_by_file=[(file_path, {2})],
     )
     source_lines = {
         file_path: tuple(file_path.read_text(encoding="utf-8").splitlines())
@@ -244,7 +244,7 @@ def test_render_flags_verbosity_does_not_change_rendered_text(
     assert "^" not in output_default
 
 
-def test_render_flags_multiline_hit_renders_snippet_lines(
+def test_05(
     tmp_path: Path,
 ) -> None:
     file_path = tmp_path / "sample.py"
@@ -277,7 +277,7 @@ def test_render_flags_multiline_hit_renders_snippet_lines(
     flags = Flags.from_parts(
         ast_grep_hits=[ast_hit],
         total_loc_by_file=[(file_path, 5)],
-        ast_grep_sloc_lines_by_file=[(file_path, {2, 3, 4})],
+        ast_sloc_lines_by_file=[(file_path, {2, 3, 4})],
     )
     source_lines = {
         file_path: tuple(file_path.read_text(encoding="utf-8").splitlines())
@@ -293,7 +293,7 @@ def test_render_flags_multiline_hit_renders_snippet_lines(
     assert "^" not in output
 
 
-def test_render_clone_uses_source_lines_for_full_duplicate_block(
+def test_06(
     tmp_path: Path,
 ) -> None:
     file_path = tmp_path / "sample.py"
@@ -335,7 +335,7 @@ def test_render_clone_uses_source_lines_for_full_duplicate_block(
     assert "6 │     return value" in output
 
 
-def test_render_flags_groups_clone_instances_into_single_entry(
+def test_07(
     tmp_path: Path,
 ) -> None:
     file_path = tmp_path / "sample.py"
@@ -394,7 +394,7 @@ def test_render_flags_groups_clone_instances_into_single_entry(
     assert "7 │     if args:" in output
 
 
-def test_render_flags_returns_empty_string_for_no_flags() -> None:
+def test_08() -> None:
     flags = Flags()
 
     assert render_flags(flags, {}) == ""

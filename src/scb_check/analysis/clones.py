@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import hashlib
-from collections import defaultdict
 from dataclasses import dataclass
+from itertools import groupby
+from operator import attrgetter
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -52,29 +53,25 @@ def detect_clones(
     files: tuple[tuple[Path, str, Tree], ...],
     min_lines: int = 3,
 ) -> tuple[CloneBlock, ...]:
-    """Find duplicated AST blocks across ``files``.
-
-    Only node types in ``CLONE_NODE_TYPES`` (function defs, loops, ``if``,
-    ``try``, ``with``, ``match``) spanning at least ``min_lines`` lines are
-    considered. Identifiers and literals are normalized before hashing so
-    blocks that differ only in variable names or literal values still
-    collide. A group must contain at least two instances to be emitted;
-    each instance is returned as its own ``CloneBlock`` sharing a
-    ``group_hash``.
-    """
-
-    groups: defaultdict[str, list[_CloneCandidate]] = defaultdict(list)
-    for file_path, source, tree in files:
-        for candidate in _iter_clone_candidates(
-            file_path,
-            source,
-            tree,
-            min_lines,
-        ):
-            groups[candidate.group_hash].append(candidate)
+    candidates = sorted(
+        (
+            candidate
+            for file_path, source, tree in files
+            for candidate in _iter_clone_candidates(
+                file_path,
+                source,
+                tree,
+                min_lines,
+            )
+        ),
+        key=attrgetter("group_hash"),
+    )
 
     clones: list[CloneBlock] = []
-    for hash_value, candidates in sorted(groups.items()):
+    for hash_value, candidates_iter in groupby(
+        candidates, key=attrgetter("group_hash")
+    ):
+        candidates = tuple(candidates_iter)
         if len(candidates) < 2:
             continue
 

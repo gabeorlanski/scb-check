@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -21,8 +22,8 @@ from scb_check.models import CloneBlock
 from scb_check.models import FileLineSet
 from scb_check.models import Flags
 from scb_check.models import FunctionSymbol
-from scb_check.resources import combined_slop_rules_file
-from scb_check.resources import load_min_file_count_thresholds
+from scb_check.resources import load_thresholds
+from scb_check.resources import rules_file
 
 if TYPE_CHECKING:
     from tree_sitter import Tree
@@ -49,17 +50,6 @@ class Findings:
 
 
 def analyze(files: tuple[Path, ...]) -> AnalysisResult:
-    """Run the full analysis pipeline over ``files``.
-
-    Parses each file with tree-sitter, runs clone detection, ast-grep slop
-    rules, and function extraction, then aggregates everything into a
-    ``Flags`` object plus the source text needed by the renderer.
-
-    Unparseable files are logged and skipped, not raised. Raises
-    ``IgnoreDirectiveError`` if any ``# scbc ignore[...]`` directive in the
-    scanned sources is malformed or references an unknown rule id.
-    """
-
     findings = _collect_findings(files)
     flags = _build_flags(
         clones=findings.clones,
@@ -99,10 +89,10 @@ def _collect_findings(files: tuple[Path, ...]) -> Findings:
         total_loc_by_file.append((file_path, len(sloc_lines)))
         functions.extend(extract_functions(file_path, tree, sloc_lines))
 
-    with combined_slop_rules_file() as rules_path:
+    with rules_file() as rules_path:
         ignore_directives = parse_ignore_directives(source_by_file, rules_path)
         ast_hits = run_sg(tuple(source_lines_by_file), rules_path)
-        thresholds = load_min_file_count_thresholds(rules_path)
+        thresholds = load_thresholds(rules_path)
 
     filtered_ast_hits = _filter_ignored_ast_hits(ast_hits, ignore_directives)
     filtered_ast_hits = _apply_count_thresholds(filtered_ast_hits, thresholds)
@@ -139,17 +129,13 @@ def _filter_ignored_ast_hits(
     ast_hits: tuple[AstGrepHit, ...],
     ignore_directives: tuple[IgnoreDirective, ...],
 ) -> tuple[AstGrepHit, ...]:
-    ignored_rule_counts: Counter[tuple[Path, int, str]] = Counter()
-    for directive in ignore_directives:
-        ignored_rule_counts.update(
-            (directive.file, directive.target_line, rule_id)
-            for rule_id in directive.rule_ids
-        )
-
+    ignored = {
+        (directive.file, directive.target_line, rule_id)
+        for directive in ignore_directives
+        for rule_id in directive.rule_ids
+    }
     return tuple(
-        hit
-        for hit in ast_hits
-        if ignored_rule_counts[(hit.file, hit.line, hit.rule_id)] <= 0
+        hit for hit in ast_hits if (hit.file, hit.line, hit.rule_id) not in ignored
     )
 
 
@@ -187,11 +173,15 @@ def _build_flags(
     )
     high_cc = [symbol for symbol in sorted_functions if symbol.complexity > 10]
 
-    clone_sloc_lines = _collect_clone_sloc_lines(
-        sorted_clones, sloc_lines_by_file
+    clone_sloc_lines = _collect_sloc_lines(
+        sorted_clones,
+        sloc_lines_by_file,
+        lambda clone: (clone.file, clone.start_line, clone.end_line),
     )
-    ast_sloc_lines = _collect_ast_sloc_lines(
-        sorted_ast_hits, sloc_lines_by_file
+    ast_sloc_lines = _collect_sloc_lines(
+        sorted_ast_hits,
+        sloc_lines_by_file,
+        lambda hit: (hit.file, hit.line, hit.end_line),
     )
 
     return Flags.from_parts(
@@ -203,46 +193,26 @@ def _build_flags(
         ),
         all_functions=sorted_functions,
         clone_sloc_lines_by_file=clone_sloc_lines,
-        ast_grep_sloc_lines_by_file=ast_sloc_lines,
+        ast_sloc_lines_by_file=ast_sloc_lines,
     )
 
 
-def _collect_clone_sloc_lines(
-    clones: list[CloneBlock],
+def _collect_sloc_lines[T](
+    items: list[T],
     sloc_lines_by_file: dict[Path, frozenset[int]],
+    span: Callable[[T], tuple[Path, int, int]],
 ) -> list[FileLineSet]:
     lines_by_file: defaultdict[Path, set[int]] = defaultdict(set)
 
-    for clone in clones:
-        sloc_lines = sloc_lines_by_file.get(clone.file, frozenset())
-        selected = lines_by_file[clone.file]
-        for line in range(clone.start_line, clone.end_line + 1):
-            if line in sloc_lines:
-                selected.add(line)
-
-    return [
-        FileLineSet.from_parts(path, lines)
-        for path, lines in sorted(
-            lines_by_file.items(), key=lambda item: item[0].as_posix()
+    for item in items:
+        path, start, end = span(item)
+        sloc_lines = sloc_lines_by_file.get(path, frozenset())
+        lines_by_file[path].update(
+            line for line in range(start, end + 1) if line in sloc_lines
         )
-    ]
-
-
-def _collect_ast_sloc_lines(
-    ast_hits: list[AstGrepHit],
-    sloc_lines_by_file: dict[Path, frozenset[int]],
-) -> list[FileLineSet]:
-    lines_by_file: defaultdict[Path, set[int]] = defaultdict(set)
-
-    for hit in ast_hits:
-        sloc_lines = sloc_lines_by_file.get(hit.file, frozenset())
-        selected = lines_by_file[hit.file]
-        for line in range(hit.line, hit.end_line + 1):
-            if line in sloc_lines:
-                selected.add(line)
 
     return [
-        FileLineSet.from_parts(path, lines)
+        FileLineSet(path, frozenset(lines))
         for path, lines in sorted(
             lines_by_file.items(), key=lambda item: item[0].as_posix()
         )

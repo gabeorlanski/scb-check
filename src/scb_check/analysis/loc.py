@@ -30,17 +30,6 @@ def sloc_line_numbers(
     source: str,
     tree: Tree | None = None,
 ) -> frozenset[int]:
-    """Return the 1-indexed line numbers of real code in ``source``.
-
-    Excludes blank lines, comment-only lines, and lines owned by a bare
-    string expression statement (module, class, and function docstrings —
-    any top-level plain-string expression that owns its physical line).
-    This is the single source of truth for SLOC throughout scb-check;
-    verbosity's denominator and numerator both derive from it. ``tree``
-    is reused when already parsed; otherwise the source is re-parsed, and
-    on parse failure docstring stripping is skipped.
-    """
-
     source_lines = source.splitlines(keepends=True)
     text_lines = source.splitlines()
     lines: set[int] = set()
@@ -50,10 +39,7 @@ def sloc_line_numbers(
 
     parsed_tree = tree if tree is not None else _parse_source_for_sloc(source)
     if parsed_tree is not None:
-        for start, end in _iter_plain_string_statement_ranges(
-            parsed_tree.root_node,
-            text_lines,
-        ):
+        for start, end in _string_ranges(parsed_tree.root_node, text_lines):
             for line_no in range(start, end + 1):
                 lines.discard(line_no)
 
@@ -67,18 +53,15 @@ def _parse_source_for_sloc(source: str) -> Tree | None:
         return None
 
 
-def _iter_plain_string_statement_ranges(
-    root: Node,
-    source_lines: list[str],
-) -> tuple[tuple[int, int], ...]:
+def _string_ranges(root: Node, source_lines: list[str]) -> tuple[tuple[int, int], ...]:
     ranges: list[tuple[int, int]] = []
     stack = [root]
     while stack:
         node = stack.pop()
         if (
             node.type == "expression_statement"
-            and (literal := _plain_string_statement_literal(node)) is not None
-            and _literal_owns_physical_line(literal, source_lines)
+            and (literal := _string_literal(node)) is not None
+            and _owns_line(literal, source_lines)
         ):
             ranges.append(
                 (
@@ -92,7 +75,7 @@ def _iter_plain_string_statement_ranges(
     return tuple(ranges)
 
 
-def _plain_string_statement_literal(statement: Node) -> Node | None:
+def _string_literal(statement: Node) -> Node | None:
     if statement.type != "expression_statement":
         return None
     if len(statement.named_children) != 1:
@@ -105,7 +88,7 @@ def _plain_string_statement_literal(statement: Node) -> Node | None:
     return None  # scbc ignore[redundant-return-none]
 
 
-def _literal_owns_physical_line(
+def _owns_line(
     literal: Node,
     source_lines: list[str],
 ) -> bool:

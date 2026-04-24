@@ -9,7 +9,7 @@ from scb_check.analysis.parse import ParseError
 from scb_check.analysis.parse import parse_file
 
 
-def test_parse_file_returns_source_and_tree() -> None:
+def test_01() -> None:
     source_path = FIXTURES / "corpus" / "module_a.py"
 
     source, tree = parse_file(source_path)
@@ -18,14 +18,14 @@ def test_parse_file_returns_source_and_tree() -> None:
     assert tree.root_node.type == "module"
 
 
-def test_parse_file_raises_for_syntax_error() -> None:
+def test_02() -> None:
     source_path = FIXTURES / "invalid.py"
 
     with pytest.raises(ParseError, match="failed to parse Python file"):
         parse_file(source_path)
 
 
-def test_parse_file_falls_back_on_non_utf8(tmp_path: Path) -> None:
+def test_03(tmp_path: Path) -> None:
     source_path = tmp_path / "weird.py"
     source_path.write_bytes(b"x = b'\\xff'\n")
 
@@ -35,6 +35,6 @@ def test_parse_file_falls_back_on_non_utf8(tmp_path: Path) -> None:
     assert tree.root_node.type == "module"
 
 
-def test_parse_file_raises_for_missing_file(tmp_path: Path) -> None:
+def test_04(tmp_path: Path) -> None:
     with pytest.raises(ParseError, match="failed to read Python file"):
         parse_file(tmp_path / "missing.py")

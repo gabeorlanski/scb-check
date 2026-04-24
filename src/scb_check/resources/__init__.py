@@ -25,7 +25,7 @@ def _rule_file_names() -> tuple[str, ...]:
     )
 
 
-def _extra_rule_paths_from_env() -> tuple[Path, ...]:
+def _env_rules() -> tuple[Path, ...]:
     raw_paths = os.environ.get(_EXTRA_RULES_ENV, "")
     if not raw_paths.strip():
         return ()
@@ -46,51 +46,31 @@ def _extra_rule_paths_from_env() -> tuple[Path, ...]:
     return tuple(paths)
 
 
-def _existing_extra_rule_paths() -> tuple[Path, ...]:
-    candidates = _extra_rule_paths_from_env()
+def _extra_rules() -> tuple[Path, ...]:
+    candidates = _env_rules()
 
     existing: list[Path] = []
     seen: set[Path] = set()
     for candidate in candidates:
         resolved = candidate.resolve()
-        if resolved in seen:
+        if resolved in seen or not resolved.is_file():
             continue
-        if not resolved.is_file():
-            continue
-
         seen.add(resolved)
         existing.append(resolved)
 
     return tuple(existing)
 
 
-def iter_slop_rule_texts() -> Iterator[tuple[str, str]]:
-    """Yield ``(name, yaml_text)`` for every bundled and extra slop rule file.
-
-    Bundled rules in ``resources/slop_rules/`` are emitted first in
-    sorted order, then any YAML paths listed in the
-    ``SCB_CHECK_EXTRA_SLOP_RULES`` environment variable
-    (``os.pathsep``-separated) that actually exist on disk.
-    """
-
+def rule_texts() -> Iterator[tuple[str, str]]:
     rules_dir = resources.files(_RULES_PACKAGE).joinpath(_RULES_DIR_NAME)
     for name in _rule_file_names():
         yield name, rules_dir.joinpath(name).read_text(encoding="utf-8")
 
-    for path in _existing_extra_rule_paths():
+    for path in _extra_rules():
         yield path.name, path.read_text(encoding="utf-8")
 
 
-def load_min_file_count_thresholds(rules_path: Path) -> dict[str, int]:
-    """Read per-rule ``min_file_count`` thresholds from the combined YAML.
-
-    A rule's ``metadata.min_file_count`` is the minimum number of hits
-    that must appear in a single file for any of that rule's hits in
-    that file to be kept. Only thresholds ``> 1`` are returned; rules
-    without the metadata key are absent from the dict (meaning "no
-    threshold").
-    """
-
+def load_thresholds(rules_path: Path) -> dict[str, int]:
     with rules_path.open("r", encoding="utf-8") as rules_file:
         documents = tuple(yaml.safe_load_all(rules_file))
 
@@ -109,22 +89,14 @@ def load_min_file_count_thresholds(rules_path: Path) -> dict[str, int]:
 
 
 @contextmanager
-def combined_slop_rules_file() -> Iterator[Path]:
-    """Write every slop rule YAML into one temp file and yield its path.
-
-    ast-grep's ``scan -r`` takes a single rules path, so bundled rules
-    plus any from ``SCB_CHECK_EXTRA_SLOP_RULES`` are concatenated into a
-    temporary file for the duration of the context. The file is unlinked
-    on exit.
-    """
-
+def rules_file() -> Iterator[Path]:
     with NamedTemporaryFile(
         mode="w",
         suffix=".yaml",
         delete=False,
         encoding="utf-8",
     ) as tmp:
-        for _, text in iter_slop_rule_texts():
+        for _, text in rule_texts():
             tmp.write(text)
             if not text.endswith("\n"):
                 tmp.write("\n")

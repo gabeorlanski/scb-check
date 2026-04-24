@@ -61,7 +61,7 @@ class Flags:
     clone_sloc_lines_by_file: tuple[FileLineSet, ...] = field(
         default_factory=tuple
     )
-    ast_grep_sloc_lines_by_file: tuple[FileLineSet, ...] = field(
+    ast_sloc_lines_by_file: tuple[FileLineSet, ...] = field(
         default_factory=tuple
     )
 
@@ -77,7 +77,7 @@ class Flags:
         clone_sloc_lines_by_file: Iterable[
             FileLineSet | tuple[Path, Iterable[int]]
         ] = (),
-        ast_grep_sloc_lines_by_file: Iterable[
+        ast_sloc_lines_by_file: Iterable[
             FileLineSet | tuple[Path, Iterable[int]]
         ] = (),
     ) -> Flags:
@@ -90,8 +90,8 @@ class Flags:
             clone_sloc_lines_by_file=_coerce_file_line_sets(
                 clone_sloc_lines_by_file
             ),
-            ast_grep_sloc_lines_by_file=_coerce_file_line_sets(
-                ast_grep_sloc_lines_by_file
+            ast_sloc_lines_by_file=_coerce_file_line_sets(
+                ast_sloc_lines_by_file
             ),
         )
 

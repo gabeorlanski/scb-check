@@ -125,8 +125,7 @@ Parse failures on individual files warn and skip, never abort the run.
 - `SCB_CHECK_EXTRA_SLOP_RULES` — `:`-separated list of YAML files layered
   on top of the bundled rules in
   [`resources/slop_rules/`](src/scb_check/resources/slop_rules/). Read by
-  `iter_slop_rule_texts` and combined into a temp file by
-  `combined_slop_rules_file` before `sg` is invoked.
+  `rule_texts` and combined into a temp file by `rules_file` before `sg` runs.
 - New CLI commands: add a `register_<name>(app: typer.Typer)` in
   [`commands/`](src/scb_check/commands/). Don't add top-level modules.
 

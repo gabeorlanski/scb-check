@@ -8,7 +8,7 @@ from scb_check.config import ConfigError
 from scb_check.config import load_config
 
 
-def test_load_config_prefers_scb_check_toml(tmp_path: Path) -> None:
+def test_01(tmp_path: Path) -> None:
     root = tmp_path / "repo"
     nested = root / "pkg" / "app"
     nested.mkdir(parents=True)
@@ -28,7 +28,7 @@ def test_load_config_prefers_scb_check_toml(tmp_path: Path) -> None:
     assert config.base_dir == root
 
 
-def test_load_config_reads_tool_table_from_pyproject(tmp_path: Path) -> None:
+def test_02(tmp_path: Path) -> None:
     root = tmp_path / "repo"
     nested = root / "a" / "b"
     nested.mkdir(parents=True)
@@ -44,7 +44,7 @@ def test_load_config_reads_tool_table_from_pyproject(tmp_path: Path) -> None:
     assert config.base_dir == root
 
 
-def test_load_config_discovers_pyproject_with_ruff_and_ty_only(
+def test_03(
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "repo"
@@ -72,7 +72,7 @@ def test_load_config_discovers_pyproject_with_ruff_and_ty_only(
     assert config.context_lines == 1
 
 
-def test_load_config_merges_ruff_ty_excludes_and_context(
+def test_04(
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "repo"
@@ -108,7 +108,7 @@ def test_load_config_merges_ruff_ty_excludes_and_context(
     assert "tests/fixtures/**" in config.exclude
 
 
-def test_load_config_ignores_malformed_external_tool_tables(
+def test_05(
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "repo"
@@ -140,7 +140,7 @@ def test_load_config_ignores_malformed_external_tool_tables(
     assert config.exclude == ("custom/**",)
 
 
-def test_load_config_with_malformed_external_override_uses_defaults(
+def test_06(
     tmp_path: Path,
 ) -> None:
     config_file = tmp_path / "pyproject.toml"
@@ -165,7 +165,7 @@ def test_load_config_with_malformed_external_override_uses_defaults(
     assert config.base_dir == tmp_path
 
 
-def test_load_config_raises_for_unknown_key(tmp_path: Path) -> None:
+def test_07(tmp_path: Path) -> None:
     config_file = tmp_path / "scb-check.toml"
     config_file.write_text("exclude = []\nextra = true\n", encoding="utf-8")
 
@@ -173,7 +173,7 @@ def test_load_config_raises_for_unknown_key(tmp_path: Path) -> None:
         load_config(config_file, tmp_path)
 
 
-def test_load_config_raises_for_unknown_key_in_tool_scb_check(
+def test_08(
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "repo"
@@ -195,7 +195,7 @@ def test_load_config_raises_for_unknown_key_in_tool_scb_check(
         load_config(None, nested)
 
 
-def test_load_config_raises_for_wrong_exclude_type(tmp_path: Path) -> None:
+def test_09(tmp_path: Path) -> None:
     config_file = tmp_path / "scb-check.toml"
     config_file.write_text('exclude = "tests/**"\n', encoding="utf-8")
 
@@ -203,7 +203,7 @@ def test_load_config_raises_for_wrong_exclude_type(tmp_path: Path) -> None:
         load_config(config_file, tmp_path)
 
 
-def test_missing_override_path_raises(tmp_path: Path) -> None:
+def test_10(tmp_path: Path) -> None:
     config_file = tmp_path / "missing.toml"
 
     with pytest.raises(ConfigError, match="config path does not exist"):

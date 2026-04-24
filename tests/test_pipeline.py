@@ -10,7 +10,7 @@ from scb_check.pipeline import IgnoreDirectiveError
 from scb_check.pipeline import analyze
 
 
-def test_same_line_ignore_suppresses_matching_ast_grep_hit(
+def test_01(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -34,10 +34,10 @@ def test_same_line_ignore_suppresses_matching_ast_grep_hit(
     result = analyze((source_file,))
 
     assert result.flags.ast_grep_hits == ()
-    assert result.flags.ast_grep_sloc_lines_by_file == ()
+    assert result.flags.ast_sloc_lines_by_file == ()
 
 
-def test_standalone_ignore_targets_next_non_comment_code_line(
+def test_02(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -67,7 +67,7 @@ def test_standalone_ignore_targets_next_non_comment_code_line(
     assert result.flags.ast_grep_hits == ()
 
 
-def test_ignore_supports_multiple_rule_ids(
+def test_03(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -96,7 +96,7 @@ def test_ignore_supports_multiple_rule_ids(
     assert result.flags.ast_grep_hits == ()
 
 
-def test_ignore_for_one_rule_does_not_suppress_other_rules(
+def test_04(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -125,7 +125,7 @@ def test_ignore_for_one_rule_does_not_suppress_other_rules(
     )
 
 
-def test_missing_reason_is_allowed_for_same_line_directive(
+def test_05(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -151,7 +151,7 @@ def test_missing_reason_is_allowed_for_same_line_directive(
     assert result.flags.ast_grep_hits == ()
 
 
-def test_missing_reason_is_allowed_for_standalone_directive(
+def test_06(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -178,7 +178,7 @@ def test_missing_reason_is_allowed_for_standalone_directive(
     assert result.flags.ast_grep_hits == ()
 
 
-def test_empty_rule_list_fails(
+def test_07(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -202,7 +202,7 @@ def test_empty_rule_list_fails(
         analyze((source_file,))
 
 
-def test_unknown_rule_id_fails(
+def test_08(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -227,7 +227,7 @@ def test_unknown_rule_id_fails(
         analyze((source_file,))
 
 
-def test_wildcard_rule_id_fails(
+def test_09(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -252,7 +252,7 @@ def test_wildcard_rule_id_fails(
         analyze((source_file,))
 
 
-def test_directive_like_text_in_string_is_ignored(
+def test_10(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -281,7 +281,7 @@ def test_directive_like_text_in_string_is_ignored(
     )
 
 
-def test_ignores_do_not_suppress_clone_or_erosion_findings(
+def test_11(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -312,7 +312,7 @@ def test_ignores_do_not_suppress_clone_or_erosion_findings(
     assert result.flags.high_cc_functions
 
 
-def test_analyze_detects_clones_across_files(
+def test_12(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -348,7 +348,7 @@ def test_analyze_detects_clones_across_files(
     assert {clone.instance_count for clone in result.flags.clones} == {2}
 
 
-def test_dataclass_count_explosion_only_fires_at_threshold(
+def test_13(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -387,7 +387,7 @@ def test_dataclass_count_explosion_only_fires_at_threshold(
     assert len(result.flags.ast_grep_hits) == 10
 
 
-def test_analyze_handles_tree_sitter_parseable_python_without_crashing(
+def test_14(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:

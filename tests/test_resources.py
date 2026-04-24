@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from scb_check.resources import combined_slop_rules_file
-from scb_check.resources import iter_slop_rule_texts
+from scb_check.resources import rule_texts
+from scb_check.resources import rules_file
 
 
 def _write_rule_file(path: Path, rule_id: str) -> None:
@@ -20,7 +20,7 @@ rule:
     )
 
 
-def test_iter_slop_rule_texts_includes_env_extra_file(
+def test_01(
     monkeypatch,
     tmp_path: Path,
 ) -> None:  # type: ignore[no-untyped-def]
@@ -28,13 +28,13 @@ def test_iter_slop_rule_texts_includes_env_extra_file(
     _write_rule_file(extra_rules, "env-extra-rule")
     monkeypatch.setenv("SCB_CHECK_EXTRA_SLOP_RULES", str(extra_rules))
 
-    named_texts = dict(iter_slop_rule_texts())
+    named_texts = dict(rule_texts())
 
     assert extra_rules.name in named_texts
     assert "id: env-extra-rule" in named_texts[extra_rules.name]
 
 
-def test_combined_slop_rules_file_includes_env_extra_file(
+def test_02(
     monkeypatch,
     tmp_path: Path,
 ) -> None:  # type: ignore[no-untyped-def]
@@ -42,7 +42,7 @@ def test_combined_slop_rules_file_includes_env_extra_file(
     _write_rule_file(extra_rules, "env-combined-extra-rule")
     monkeypatch.setenv("SCB_CHECK_EXTRA_SLOP_RULES", str(extra_rules))
 
-    with combined_slop_rules_file() as rules_path:
+    with rules_file() as rules_path:
         combined_text = rules_path.read_text(encoding="utf-8")
 
     assert "id: env-combined-extra-rule" in combined_text

@@ -9,7 +9,7 @@ from scb_check.walker import PathError
 from scb_check.walker import discover_python_files
 
 
-def test_discover_python_files_skips_default_excluded_dirs(
+def test_01(
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "repo"
@@ -31,7 +31,7 @@ def test_discover_python_files_skips_default_excluded_dirs(
     )
 
 
-def test_discover_python_files_applies_user_excludes(tmp_path: Path) -> None:
+def test_02(tmp_path: Path) -> None:
     root = tmp_path / "repo"
     generated = root / "generated"
     pkg = root / "pkg"
@@ -46,7 +46,7 @@ def test_discover_python_files_applies_user_excludes(tmp_path: Path) -> None:
     assert files == ((pkg / "keep.py").resolve(),)
 
 
-def test_discover_python_files_raises_for_missing_path(tmp_path: Path) -> None:
+def test_03(tmp_path: Path) -> None:
     with pytest.raises(PathError, match="path does not exist"):
         discover_python_files(
             tmp_path / "missing",
@@ -54,7 +54,7 @@ def test_discover_python_files_raises_for_missing_path(tmp_path: Path) -> None:
         )
 
 
-def test_discover_python_files_raises_for_non_python_file(
+def test_04(
     tmp_path: Path,
 ) -> None:
     source = tmp_path / "notes.txt"
@@ -64,7 +64,7 @@ def test_discover_python_files_raises_for_non_python_file(
         discover_python_files(source, Config(exclude=(), base_dir=tmp_path))
 
 
-def test_discover_python_files_raises_for_empty_directory(
+def test_05(
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "empty"

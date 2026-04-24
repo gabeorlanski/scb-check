@@ -14,7 +14,7 @@ from tokenize import generate_tokens
 
 import yaml
 
-COMMENT_DIRECTIVE_PATTERN = re.compile(
+DIRECTIVE_RE = re.compile(
     r"^scbc\s+ignore\[(?P<rule_ids>[^\]]*)\].*$"
 )
 NON_CODE_TOKEN_TYPES = frozenset(
@@ -45,17 +45,6 @@ def parse_ignore_directives(
     source_by_file: dict[Path, str],
     rules_path: Path,
 ) -> tuple[IgnoreDirective, ...]:
-    """Parse ``# scbc ignore[rule-id,...]`` directives from every file.
-
-    Each returned directive records the line it was written on plus the
-    ``target_line`` it suppresses — same-line directives target their own
-    line, standalone directives target the next non-blank, non-comment
-    code line. Rule ids are validated against ``rules_path``; unknown ids,
-    wildcard (``*``) entries, empty rule lists, or tokenizer failures are
-    accumulated across all files and raised together as
-    ``IgnoreDirectiveError``.
-    """
-
     valid_rule_ids = _load_valid_rule_ids(rules_path)
 
     directives: list[IgnoreDirective] = []
@@ -120,40 +109,20 @@ def _parse_file_directives(
     source: str,
     valid_rule_ids: frozenset[str],
 ) -> tuple[tuple[IgnoreDirective, ...], tuple[str, ...]]:
-    comments_by_line: dict[int, tuple[str, bool]] = {}
-    code_lines: set[int] = set()
-    matched_directives: list[tuple[int, str]] = []
-    errors: list[str] = []
-
-    token_lines = source.splitlines(keepends=True)
     try:
-        tokens = tuple(generate_tokens(iter(token_lines).__next__))
+        comments_by_line, code_lines, matches = _scan_directives(source)
     except TokenError as exc:
-        line_no = _token_error_line(exc)
-        errors.append(
+        return (), (
             _format_error(
                 file_path,
-                line_no,
+                _token_error_line(exc),
                 f"failed to parse ignore directives: {exc}",
-            )
+            ),
         )
-        return (), tuple(errors)
-
-    for token in tokens:
-        if token.type == COMMENT:
-            comment_text = token.string.removeprefix("#").strip()
-            has_code_prefix = token.line[: token.start[1]].strip() != ""
-            comments_by_line[token.start[0]] = (comment_text, has_code_prefix)
-            directive = _match_directive(comment_text)
-            if directive is not None:
-                matched_directives.append((token.start[0], directive))
-            continue
-
-        if token.type not in NON_CODE_TOKEN_TYPES:
-            code_lines.add(token.start[0])
 
     directives: list[IgnoreDirective] = []
-    for directive_line, directive in matched_directives:
+    errors: list[str] = []
+    for directive_line, directive in matches:
         rule_ids_text = directive
         rule_ids, rule_errors = _validated_rule_ids(
             file_path,
@@ -192,8 +161,31 @@ def _parse_file_directives(
     return tuple(directives), tuple(errors)
 
 
+def _scan_directives(
+    source: str,
+) -> tuple[dict[int, tuple[str, bool]], set[int], tuple[tuple[int, str], ...]]:
+    comments: dict[int, tuple[str, bool]] = {}
+    code_lines: set[int] = set()
+    matches: list[tuple[int, str]] = []
+
+    for token in generate_tokens(iter(source.splitlines(keepends=True)).__next__):
+        if token.type == COMMENT:
+            comment_text = token.string.removeprefix("#").strip()
+            comments[token.start[0]] = (
+                comment_text,
+                token.line[: token.start[1]].strip() != "",
+            )
+            directive = _match_directive(comment_text)
+            if directive is not None:
+                matches.append((token.start[0], directive))
+        elif token.type not in NON_CODE_TOKEN_TYPES:
+            code_lines.add(token.start[0])
+
+    return comments, code_lines, tuple(matches)
+
+
 def _match_directive(comment_text: str) -> str | None:
-    match = COMMENT_DIRECTIVE_PATTERN.match(comment_text)
+    match = DIRECTIVE_RE.match(comment_text)
     return match.group("rule_ids") if match else None
 
 

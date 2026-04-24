@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import io
-from typing import Annotated, Any
+from typing import Annotated, cast
 
 import typer
 import yaml
 
-from scb_check.resources import iter_slop_rule_texts
+from scb_check.resources import rule_texts
 
 
 def register_rule(app: typer.Typer) -> None:
@@ -28,11 +28,11 @@ def register_rule(app: typer.Typer) -> None:
         typer.echo(rendered)
 
 
-def _find_rule(rule_name: str) -> dict[str, Any] | None:
-    for _, text in iter_slop_rule_texts():
-        for document in yaml.safe_load_all(io.StringIO(text)):
-            if not isinstance(document, dict):
-                continue
-            if document.get("id") == rule_name:
-                return document
-    return None
+def _find_rule(rule_name: str) -> dict[str, str] | None:
+    matches = (
+        cast("dict[str, str]", document)
+        for _, text in rule_texts()
+        for document in yaml.safe_load_all(io.StringIO(text))
+        if isinstance(document, dict) and document.get("id") == rule_name
+    )
+    return next(matches, None)

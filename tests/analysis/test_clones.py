@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from tree_sitter import Tree
 
 
-def test_detect_clones_returns_instance_flags() -> None:
+def test_01() -> None:
     source_path = FIXTURES / "corpus" / "module_a.py"
     source, tree = parse_file(source_path)
 
@@ -28,7 +28,7 @@ def test_detect_clones_returns_instance_flags() -> None:
     assert all(1 <= len(clone.first_lines) <= 3 for clone in clones)
 
 
-def test_detect_clones_keeps_different_binary_operators_distinct(
+def test_02(
     tmp_path: Path,
 ) -> None:
     parsed_file = _parse_source(
@@ -49,7 +49,7 @@ def test_detect_clones_keeps_different_binary_operators_distinct(
     assert clones == ()
 
 
-def test_detect_clones_normalizes_identifiers_and_literals(
+def test_03(
     tmp_path: Path,
 ) -> None:
     parsed_file = _parse_source(

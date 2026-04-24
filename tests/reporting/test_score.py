@@ -8,7 +8,7 @@ from scb_check.models import FunctionSymbol
 from scb_check.reporting.score import compute_report
 
 
-def test_compute_report_calculates_ratios_and_masses() -> None:
+def test_01() -> None:
     path = Path("sample.py")
     high = FunctionSymbol(
         file=path,
@@ -31,7 +31,7 @@ def test_compute_report_calculates_ratios_and_masses() -> None:
         total_loc_by_file=[(path, 10)],
         all_functions=[high, low],
         clone_sloc_lines_by_file=[(path, {2, 3})],
-        ast_grep_sloc_lines_by_file=[(path, {3, 4})],
+        ast_sloc_lines_by_file=[(path, {3, 4})],
     )
 
     report = compute_report(flags)
@@ -48,7 +48,7 @@ def test_compute_report_calculates_ratios_and_masses() -> None:
     assert isclose(report.erosion, 36.0 / 44.0)
 
 
-def test_compute_report_zero_guards() -> None:
+def test_02() -> None:
     flags = Flags()
 
     report = compute_report(flags)

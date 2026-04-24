@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections import defaultdict
 from pathlib import Path
 
 from scb_check.models import AstGrepHit
@@ -16,17 +15,6 @@ def render_flags(
     context_lines: int = 1,
     verbosity: int = 0,
 ) -> str:
-    """Render ``flags`` as human-readable ty/ruff-style warning blocks.
-
-    Blocks are ordered by ``(display_path, start_line, kind_rank)`` with
-    kind_rank clone=0, ast-grep=1, erosion=2, and separated by blank
-    lines. Each block starts with a stable textual prefix
-    (``duplicate-structure:``, ``warning[<rule>]:``, ``erosion:``) that
-    tests assert on. Clones are grouped by ``group_hash`` so every
-    duplicate of a block renders once with all instances inline.
-    Returns the empty string when ``flags`` has nothing to report.
-    """
-
     rendered: list[tuple[tuple[str, int, int], str]] = []
 
     for group in _group_clones(flags.clones):
@@ -75,23 +63,20 @@ def render_flags(
 
 def _group_clones(
     clones: tuple[CloneBlock, ...],
-) -> list[tuple[CloneBlock, ...]]:
-    groups: dict[str, list[CloneBlock]] = defaultdict(list)
-    order: list[str] = []
-
+) -> tuple[tuple[CloneBlock, ...], ...]:
+    groups: dict[str, list[CloneBlock]] = {}
     for clone in clones:  # scbc: ignore[verbose-list-append-loop]
-        if clone.group_hash not in groups:
-            order.append(clone.group_hash)
-        groups[clone.group_hash].append(clone)
+        groups.setdefault(clone.group_hash, []).append(clone)
 
-    ordered: list[tuple[CloneBlock, ...]] = []
-    for hash_value in order:
-        sorted_instances = sorted(
-            groups[hash_value],
-            key=lambda clone: (_display_path(clone.file), clone.start_line),
+    return tuple(
+        tuple(
+            sorted(
+                group,
+                key=lambda clone: (_display_path(clone.file), clone.start_line),
+            )
         )
-        ordered.append(tuple(sorted_instances))
-    return ordered
+        for group in groups.values()
+    )
 
 
 def _make_clone_body_lines(
@@ -125,10 +110,9 @@ def _render_clone_group(
     ]
 
     for index, clone in enumerate(instances):
-        if index > 0:
-            lines.append(f"{pad} ┆")
         lines.extend(
-            _make_clone_body_lines(
+            ([f"{pad} ┆"] if index else [])
+            + _make_clone_body_lines(
                 clone,
                 source_lines_by_file,
                 line_number_width,
@@ -194,45 +178,23 @@ def _render_ast_grep(
 def _ordered_ast_grep_hits(
     ast_hits: tuple[AstGrepHit, ...],
 ) -> tuple[AstGrepHit, ...]:
-    sorted_hits = tuple(
-        sorted(
-            ast_hits,
-            key=lambda hit: (
-                hit.file.as_posix(),
-                hit.line,
-                hit.col,
-                hit.end_line,
-                hit.end_col,
-                hit.rule_id,
-                hit.message,
-                hit.matched_text,
-            ),
+    return tuple(
+        dict.fromkeys(
+            sorted(
+                ast_hits,
+                key=lambda hit: (
+                    hit.file.as_posix(),
+                    hit.line,
+                    hit.col,
+                    hit.end_line,
+                    hit.end_col,
+                    hit.rule_id,
+                    hit.message,
+                    hit.matched_text,
+                ),
+            )
         )
     )
-    return _dedupe_hits(sorted_hits)
-
-
-def _dedupe_hits(hits: tuple[AstGrepHit, ...]) -> tuple[AstGrepHit, ...]:
-    seen: set[tuple[str, int, int, int, int, str, str, str]] = set()
-    deduped: list[AstGrepHit] = []
-
-    for hit in hits:
-        dedupe_key = (
-            hit.file.as_posix(),
-            hit.line,
-            hit.end_line,
-            hit.col,
-            hit.end_col,
-            hit.rule_id,
-            hit.matched_text,
-            hit.message,
-        )
-        if dedupe_key in seen:
-            continue
-        seen.add(dedupe_key)
-        deduped.append(hit)
-
-    return tuple(deduped)
 
 
 def _render_erosion(

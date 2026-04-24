@@ -10,7 +10,7 @@ from conftest import FIXTURES
 from scb_check.analysis.astgrep import run_sg
 
 
-def test_run_sg_returns_empty_when_binary_missing(
+def test_01(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -25,7 +25,7 @@ def test_run_sg_returns_empty_when_binary_missing(
     assert hits == ()
 
 
-def test_run_sg_collects_hits_for_chained_dict_get() -> None:
+def test_02() -> None:
     if shutil.which("sg") is None:
         pytest.skip("sg binary not available")
 
@@ -43,7 +43,7 @@ def test_run_sg_collects_hits_for_chained_dict_get() -> None:
     assert any(hit.rule_id == "chained-dict-get" for hit in hits)
 
 
-def test_run_sg_skips_hits_missing_required_payload_fields(
+def test_03(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:

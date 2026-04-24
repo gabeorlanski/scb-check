@@ -10,7 +10,7 @@ from scb_check.analysis.parse import parse_file
 from scb_check.analysis.symbols import extract_functions
 
 
-def test_extract_functions_includes_nested_and_methods() -> None:
+def test_01() -> None:
     source_path = FIXTURES / "symbols_sample.py"
     source, tree = parse_file(source_path)
 
@@ -22,7 +22,7 @@ def test_extract_functions_includes_nested_and_methods() -> None:
     assert names == {"format_name", "outer", "inner"}
 
 
-def test_extract_functions_computes_complexity_and_sloc() -> None:
+def test_02() -> None:
     source_path = FIXTURES / "corpus" / "module_b.py"
     source, tree = parse_file(source_path)
 
@@ -37,7 +37,7 @@ def test_extract_functions_computes_complexity_and_sloc() -> None:
     assert complex_symbol.sloc > 0
 
 
-def test_extract_functions_uses_canonical_sloc_lines(tmp_path: Path) -> None:
+def test_03(tmp_path: Path) -> None:
     source_path = tmp_path / "sample.py"
     source_path.write_text(
         dedent(

@@ -33,34 +33,16 @@ def extract_functions(
     tree: Tree,
     sloc_lines: frozenset[int],
 ) -> tuple[FunctionSymbol, ...]:
-    """Walk ``tree`` and emit a ``FunctionSymbol`` per function def.
-
-    Cyclomatic complexity starts at 1 and increments for every node in
-    ``COMPLEXITY_NODE_TYPES`` inside the function (including nested
-    comprehensions, boolean operators, and conditional expressions).
-    ``sloc`` counts the function's physical lines that are also present
-    in ``sloc_lines``, so docstrings and blanks don't inflate it. Nested
-    functions are emitted as siblings; methods are emitted flat with the
-    class acting only as a traversal vehicle.
-    """
-
     symbols: list[FunctionSymbol] = []
-    _extract_functions_from_node(
-        tree.root_node,
-        file_path,
-        sloc_lines,
-        symbols,
-        None,
-    )
+    _extract_funcs(tree.root_node, file_path, sloc_lines, symbols)
     return tuple(symbols)
 
 
-def _extract_functions_from_node(
+def _extract_funcs(
     node: Node,
     file_path: Path,
     sloc_lines: frozenset[int],
     symbols: list[FunctionSymbol],
-    parent_class: str | None,
 ) -> None:
     for child in node.children:
         if child.type == "function_definition":
@@ -70,16 +52,8 @@ def _extract_functions_from_node(
                 sloc_lines,
                 symbols,
             )
-        elif child.type == "class_definition":
-            _handle_class(child, file_path, sloc_lines, symbols)
-        elif child.type == "decorated_definition" or child.type == "block":
-            _extract_functions_from_node(
-                child,
-                file_path,
-                sloc_lines,
-                symbols,
-                parent_class,
-            )
+        elif child.type == "class_definition" or child.type == "decorated_definition" or child.type == "block":
+            _extract_funcs(child, file_path, sloc_lines, symbols)
 
 
 def _handle_function(
@@ -105,23 +79,7 @@ def _handle_function(
         )
     )
 
-    _extract_functions_from_node(node, file_path, sloc_lines, symbols, None)
-
-
-def _handle_class(
-    node: Node,
-    file_path: Path,
-    sloc_lines: frozenset[int],
-    symbols: list[FunctionSymbol],
-) -> None:
-    class_name = _name_from_node(node)
-    _extract_functions_from_node(
-        node,
-        file_path,
-        sloc_lines,
-        symbols,
-        class_name,
-    )
+    _extract_funcs(node, file_path, sloc_lines, symbols)
 
 
 def _name_from_node(node: Node) -> str | None:

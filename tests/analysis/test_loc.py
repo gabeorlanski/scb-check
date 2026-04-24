@@ -3,7 +3,7 @@ from __future__ import annotations
 from scb_check.analysis.loc import sloc_line_numbers
 
 
-def test_sloc_line_numbers_tracks_1_indexed_lines() -> None:
+def test_01() -> None:
     source = """
 # one
 alpha = 1
@@ -15,7 +15,7 @@ beta = 2  # inline comments still count
     assert sloc_line_numbers(source) == frozenset({2, 5})
 
 
-def test_sloc_line_numbers_excludes_docstrings() -> None:
+def test_02() -> None:
     source = '''
 """module docstring"""
 
@@ -27,7 +27,7 @@ def marker():
     assert sloc_line_numbers(source) == frozenset({3, 5})
 
 
-def test_sloc_line_numbers_excludes_standalone_plain_strings() -> None:
+def test_03() -> None:
     source = '''
 def marker():
     value = 1
@@ -38,7 +38,7 @@ def marker():
     assert sloc_line_numbers(source) == frozenset({1, 2, 4})
 
 
-def test_sloc_line_numbers_excludes_multiline_plain_strings() -> None:
+def test_04() -> None:
     source = '''
 def marker():
     """
@@ -52,7 +52,7 @@ def marker():
     assert sloc_line_numbers(source) == frozenset({1, 7})
 
 
-def test_sloc_line_numbers_keeps_f_string_expression() -> None:
+def test_05() -> None:
     source = """
 def marker():
     f"not a docstring"
@@ -62,7 +62,7 @@ def marker():
     assert sloc_line_numbers(source) == frozenset({1, 2, 3})
 
 
-def test_sloc_line_numbers_does_not_warn_for_invalid_escape_sequence(
+def test_06(
     recwarn,
 ) -> None:  # type: ignore[no-untyped-def]
     source = """

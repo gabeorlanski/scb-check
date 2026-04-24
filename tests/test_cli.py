@@ -13,7 +13,7 @@ from scb_check.pipeline import AnalysisResult
 from scb_check.pipeline import IgnoreDirectiveError
 
 
-def test_cli_report_mode_outputs_json(
+def test_01(
     monkeypatch,
     tmp_path: Path,
 ) -> None:  # type: ignore[no-untyped-def]
@@ -53,7 +53,7 @@ def test_cli_report_mode_outputs_json(
     }
 
 
-def test_cli_default_mode_emits_flag_text(
+def test_02(
     monkeypatch,
     tmp_path: Path,
 ) -> None:  # type: ignore[no-untyped-def]
@@ -92,7 +92,7 @@ def test_cli_default_mode_emits_flag_text(
     )
 
 
-def test_cli_returns_exit_2_for_missing_path() -> None:
+def test_03() -> None:
     runner = CliRunner()
     result = runner.invoke(
         main,
@@ -103,7 +103,7 @@ def test_cli_returns_exit_2_for_missing_path() -> None:
     assert "path does not exist" in result.output
 
 
-def test_cli_returns_exit_2_for_non_python_file(tmp_path: Path) -> None:
+def test_04(tmp_path: Path) -> None:
     source = tmp_path / "notes.txt"
     source.write_text("hello\n", encoding="utf-8")
     runner = CliRunner()
@@ -113,7 +113,7 @@ def test_cli_returns_exit_2_for_non_python_file(tmp_path: Path) -> None:
     assert f"not a Python file: {source}" in result.output
 
 
-def test_cli_returns_exit_2_for_missing_config_path(tmp_path: Path) -> None:
+def test_05(tmp_path: Path) -> None:
     source = tmp_path / "sample.py"
     source.write_text("x = 1\n", encoding="utf-8")
     config_path = tmp_path / "missing.toml"
@@ -128,7 +128,7 @@ def test_cli_returns_exit_2_for_missing_config_path(tmp_path: Path) -> None:
     assert f"config path does not exist: {config_path}" in result.output
 
 
-def test_cli_skips_parse_failures_and_continues(
+def test_06(
     monkeypatch, tmp_path: Path
 ) -> None:  # type: ignore[no-untyped-def]
     source_dir = tmp_path / "project"
@@ -155,7 +155,7 @@ def test_cli_skips_parse_failures_and_continues(
     assert payload["files_scanned"] == 1
 
 
-def test_cli_returns_exit_2_when_no_python_files_found(tmp_path: Path) -> None:
+def test_07(tmp_path: Path) -> None:
     source_dir = tmp_path / "empty"
     source_dir.mkdir()
     runner = CliRunner()
@@ -165,7 +165,7 @@ def test_cli_returns_exit_2_when_no_python_files_found(tmp_path: Path) -> None:
     assert "no Python files found" in result.output
 
 
-def test_cli_rule_prints_requested_yaml_rule() -> None:
+def test_08() -> None:
     runner = CliRunner()
 
     result = runner.invoke(main, ["rule", "chained-dict-get"])
@@ -175,7 +175,7 @@ def test_cli_rule_prints_requested_yaml_rule() -> None:
     assert payload["id"] == "chained-dict-get"
 
 
-def test_cli_rule_returns_exit_2_for_unknown_rule() -> None:
+def test_09() -> None:
     runner = CliRunner()
 
     result = runner.invoke(main, ["rule", "does-not-exist"])
@@ -184,7 +184,7 @@ def test_cli_rule_returns_exit_2_for_unknown_rule() -> None:
     assert "rule not found: does-not-exist" in result.output
 
 
-def test_cli_passes_context_and_verbosity_to_render(
+def test_10(
     monkeypatch, tmp_path: Path
 ) -> None:  # type: ignore[no-untyped-def]
     source_dir = tmp_path / "project"
@@ -227,7 +227,7 @@ def test_cli_passes_context_and_verbosity_to_render(
     assert captured["verbosity"] == 2
 
 
-def test_cli_supports_long_verbosity_option(
+def test_11(
     monkeypatch, tmp_path: Path
 ) -> None:  # type: ignore[no-untyped-def]
     source_dir = tmp_path / "project"
@@ -274,7 +274,7 @@ def test_cli_supports_long_verbosity_option(
     assert captured["verbosity"] == 1
 
 
-def test_cli_returns_exit_2_for_ignore_directive_error(
+def test_12(
     monkeypatch, tmp_path: Path
 ) -> None:  # type: ignore[no-untyped-def]
     source = tmp_path / "sample.py"
