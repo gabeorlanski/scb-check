@@ -114,11 +114,13 @@ class Report:
 def _coerce_file_line_sets(
     values: Iterable[FileLineSet | tuple[Path, Iterable[int]]],
 ) -> tuple[FileLineSet, ...]:
-    normalized: list[FileLineSet] = []
-    for value in values:
-        if isinstance(value, FileLineSet):
-            normalized.append(value)
-            continue
-        path, lines = value
-        normalized.append(FileLineSet.from_parts(path, lines))
-    return tuple(normalized)
+    return tuple(_coerce_file_line_set(value) for value in values)
+
+
+def _coerce_file_line_set(
+    value: FileLineSet | tuple[Path, Iterable[int]],
+) -> FileLineSet:
+    if isinstance(value, FileLineSet):
+        return value
+    path, lines = value
+    return FileLineSet.from_parts(path, lines)

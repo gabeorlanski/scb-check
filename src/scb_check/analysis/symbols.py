@@ -33,6 +33,17 @@ def extract_functions(
     tree: Tree,
     sloc_lines: frozenset[int],
 ) -> tuple[FunctionSymbol, ...]:
+    """Walk ``tree`` and emit a ``FunctionSymbol`` per function def.
+
+    Cyclomatic complexity starts at 1 and increments for every node in
+    ``COMPLEXITY_NODE_TYPES`` inside the function (including nested
+    comprehensions, boolean operators, and conditional expressions).
+    ``sloc`` counts the function's physical lines that are also present
+    in ``sloc_lines``, so docstrings and blanks don't inflate it. Nested
+    functions are emitted as siblings; methods are emitted flat with the
+    class acting only as a traversal vehicle.
+    """
+
     symbols: list[FunctionSymbol] = []
     _extract_functions_from_node(
         tree.root_node,
@@ -58,7 +69,6 @@ def _extract_functions_from_node(
                 file_path,
                 sloc_lines,
                 symbols,
-                parent_class,
             )
         elif child.type == "class_definition":
             _handle_class(child, file_path, sloc_lines, symbols)
@@ -77,10 +87,7 @@ def _handle_function(
     file_path: Path,
     sloc_lines: frozenset[int],
     symbols: list[FunctionSymbol],
-    parent_class: str | None,
 ) -> None:
-    del parent_class
-
     name = _name_from_node(node)
     if name is None:
         return
@@ -118,13 +125,16 @@ def _handle_class(
 
 
 def _name_from_node(node: Node) -> str | None:
-    for child in node.children:
-        if child.type in {"identifier", "name"}:
-            text = child.text
-            if text is None:
-                return None
-            return text.decode("utf-8")
-    return None
+    name_node = next(
+        (
+            child
+            for child in node.children
+            if child.type in {"identifier", "name"}
+        ),
+        None,
+    )
+    text = name_node.text if name_node is not None else None
+    return text.decode("utf-8") if text is not None else None
 
 
 def _count_complexity(node: Node) -> int:

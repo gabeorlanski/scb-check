@@ -9,6 +9,16 @@ from scb_check.models import Report
 
 
 def compute_report(flags: Flags) -> Report:
+    """Reduce ``flags`` to the JSON-ready ``Report`` composite.
+
+    Verbosity is the per-file union of clone SLOC lines and ast-grep SLOC
+    lines, summed across files and divided by total SLOC — lines flagged
+    by both sources count once. Erosion is ``high_cc_mass / total_mass``
+    where mass is ``complexity * sqrt(sloc)``. When ``total_loc`` is 0 all
+    verbosity-related counts are zeroed; likewise erosion when
+    ``total_mass`` is 0.
+    """
+
     total_loc = sum(loc for _, loc in flags.total_loc_by_file)
     clone_lines_by_file = {
         entry.file: entry.lines for entry in flags.clone_sloc_lines_by_file

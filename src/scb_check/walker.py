@@ -26,11 +26,23 @@ DEFAULT_EXCLUDED_DIRS = frozenset(
 )
 
 
-class PathError(ValueError):
+class PathError(ValueError):  # scbc ignore[empty-exception-subclass]
     pass
 
 
 def discover_python_files(path: Path, config: Config) -> tuple[Path, ...]:
+    """Resolve ``path`` to a sorted tuple of ``.py`` files to analyze.
+
+    A file path is returned as-is (after resolving) provided it has a
+    ``.py`` suffix. A directory is walked; ``DEFAULT_EXCLUDED_DIRS``
+    (``.git``, ``__pycache__``, ``.venv``, build output, tool caches...)
+    are pruned, symlinks are skipped, and user ``config.exclude`` globs
+    are applied to each candidate relative to ``config.base_dir``.
+    Patterns support ``**`` for recursive matching. Raises ``PathError``
+    when the path is missing, not a Python file, or contains no
+    matching files.
+    """
+
     if not path.exists():
         raise PathError(f"path does not exist: {path}")
 
@@ -69,14 +81,13 @@ def _discover_from_directory(path: Path, config: Config) -> list[Path]:
 
 
 def _is_user_excluded(candidate: Path, config: Config) -> bool:
-    if not config.exclude:
-        return False
-
     rel_path = Path(
         os.path.relpath(candidate, start=config.base_dir)
     ).as_posix()
     parts = tuple(part for part in rel_path.split("/") if part)
-    return any(_match_pattern(parts, pattern) for pattern in config.exclude)
+    return bool(config.exclude) and any(
+        _match_pattern(parts, pattern) for pattern in config.exclude
+    )
 
 
 def _match_pattern(path_parts: tuple[str, ...], pattern: str) -> bool:

@@ -37,7 +37,7 @@ class IgnoreDirective:
     rule_ids: tuple[str, ...]
 
 
-class IgnoreDirectiveError(ValueError):
+class IgnoreDirectiveError(ValueError):  # scbc ignore[empty-exception-subclass]
     pass
 
 
@@ -45,6 +45,17 @@ def parse_ignore_directives(
     source_by_file: dict[Path, str],
     rules_path: Path,
 ) -> tuple[IgnoreDirective, ...]:
+    """Parse ``# scbc ignore[rule-id,...]`` directives from every file.
+
+    Each returned directive records the line it was written on plus the
+    ``target_line`` it suppresses — same-line directives target their own
+    line, standalone directives target the next non-blank, non-comment
+    code line. Rule ids are validated against ``rules_path``; unknown ids,
+    wildcard (``*``) entries, empty rule lists, or tokenizer failures are
+    accumulated across all files and raised together as
+    ``IgnoreDirectiveError``.
+    """
+
     valid_rule_ids = _load_valid_rule_ids(rules_path)
 
     directives: list[IgnoreDirective] = []
@@ -131,7 +142,7 @@ def _parse_file_directives(
     for token in tokens:
         if token.type == COMMENT:
             comment_text = token.string.removeprefix("#").strip()
-            has_code_prefix = bool(token.line[: token.start[1]].strip())
+            has_code_prefix = token.line[: token.start[1]].strip() != ""
             comments_by_line[token.start[0]] = (comment_text, has_code_prefix)
             directive = _match_directive(comment_text)
             if directive is not None:
@@ -208,26 +219,39 @@ def _validated_rule_ids(
             ),
         )
 
-    errors: list[str] = []
-    for rule_id in parsed_rule_ids:
-        if rule_id == "*":
-            errors.append(
-                _format_error(
-                    file_path,
-                    line_no,
-                    "wildcard ignores are not supported",
-                )
+    errors = tuple(
+        error
+        for rule_id in parsed_rule_ids
+        if (
+            error := _rule_id_error(
+                file_path,
+                line_no,
+                rule_id,
+                valid_rule_ids,
             )
-            continue
-        if rule_id not in valid_rule_ids:
-            errors.append(
-                _format_error(
-                    file_path,
-                    line_no,
-                    f"unknown ast-grep rule id: {rule_id}",
-                )
-            )
-    return parsed_rule_ids, tuple(errors)
+        )
+        is not None
+    )
+    return parsed_rule_ids, errors
+
+
+def _rule_id_error(
+    file_path: Path,
+    line_no: int,
+    rule_id: str,
+    valid_rule_ids: frozenset[str],
+) -> str | None:
+    message = None
+    if rule_id == "*":
+        message = "wildcard ignores are not supported"
+    elif rule_id not in valid_rule_ids:
+        message = f"unknown ast-grep rule id: {rule_id}"
+
+    return (
+        _format_error(file_path, line_no, message)
+        if message is not None
+        else None
+    )
 
 
 def _token_error_line(exc: TokenError) -> int:

@@ -25,6 +25,16 @@ def test_parse_file_raises_for_syntax_error() -> None:
         parse_file(source_path)
 
 
+def test_parse_file_falls_back_on_non_utf8(tmp_path: Path) -> None:
+    source_path = tmp_path / "weird.py"
+    source_path.write_bytes(b"x = b'\\xff'\n")
+
+    source, tree = parse_file(source_path)
+
+    assert "x" in source
+    assert tree.root_node.type == "module"
+
+
 def test_parse_file_raises_for_missing_file(tmp_path: Path) -> None:
     with pytest.raises(ParseError, match="failed to read Python file"):
         parse_file(tmp_path / "missing.py")

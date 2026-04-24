@@ -30,6 +30,17 @@ def sloc_line_numbers(
     source: str,
     tree: Tree | None = None,
 ) -> frozenset[int]:
+    """Return the 1-indexed line numbers of real code in ``source``.
+
+    Excludes blank lines, comment-only lines, and lines owned by a bare
+    string expression statement (module, class, and function docstrings —
+    any top-level plain-string expression that owns its physical line).
+    This is the single source of truth for SLOC throughout scb-check;
+    verbosity's denominator and numerator both derive from it. ``tree``
+    is reused when already parsed; otherwise the source is re-parsed, and
+    on parse failure docstring stripping is skipped.
+    """
+
     source_lines = source.splitlines(keepends=True)
     text_lines = source.splitlines()
     lines: set[int] = set()
@@ -91,7 +102,7 @@ def _plain_string_statement_literal(statement: Node) -> Node | None:
     if expression.type == "string" and _is_plain_string_node(expression):
         return expression
 
-    return None
+    return None  # scbc ignore[redundant-return-none]
 
 
 def _literal_owns_physical_line(

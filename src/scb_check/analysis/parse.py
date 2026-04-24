@@ -7,8 +7,12 @@ from tree_sitter import Language
 from tree_sitter import Parser
 from tree_sitter import Tree
 
+from scb_check.logging import get_logger
 
-class ParseError(ValueError):
+logger = get_logger(__name__)
+
+
+class ParseError(ValueError):  # scbc ignore[empty-exception-subclass]
     pass
 
 
@@ -16,8 +20,21 @@ _PARSER: Parser | None = None
 
 
 def parse_file(file_path: Path) -> tuple[str, Tree]:
+    """Read ``file_path`` and parse it with the shared tree-sitter parser.
+
+    Returns ``(source, tree)``. Raises ``ParseError`` if the file cannot
+    be read or if tree-sitter reports a syntax error — callers
+    (the pipeline) catch this and skip the file with a warning.
+    """
+
     try:
         source = file_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        logger.warning(
+            "file is not valid UTF-8, reading with replacement characters",
+            file=str(file_path),
+        )
+        source = file_path.read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
         raise ParseError(f"failed to read Python file: {file_path}") from exc
 

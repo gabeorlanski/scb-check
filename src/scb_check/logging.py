@@ -11,11 +11,15 @@ if TYPE_CHECKING:
 
 
 def _log_level(verbosity: int) -> int:
-    if verbosity >= 2:
-        return logging.DEBUG
-    if verbosity == 1:
-        return logging.INFO
-    return logging.WARNING
+    levels = {
+        0: logging.WARNING,
+        1: logging.INFO,
+    }
+    return (
+        logging.DEBUG
+        if verbosity >= 2
+        else levels.get(verbosity, logging.WARNING)
+    )
 
 
 def configure_logging(verbosity: int) -> None:

@@ -16,6 +16,17 @@ def render_flags(
     context_lines: int = 1,
     verbosity: int = 0,
 ) -> str:
+    """Render ``flags`` as human-readable ty/ruff-style warning blocks.
+
+    Blocks are ordered by ``(display_path, start_line, kind_rank)`` with
+    kind_rank clone=0, ast-grep=1, erosion=2, and separated by blank
+    lines. Each block starts with a stable textual prefix
+    (``duplicate-structure:``, ``warning[<rule>]:``, ``erosion:``) that
+    tests assert on. Clones are grouped by ``group_hash`` so every
+    duplicate of a block renders once with all instances inline.
+    Returns the empty string when ``flags`` has nothing to report.
+    """
+
     rendered: list[tuple[tuple[str, int, int], str]] = []
 
     for group in _group_clones(flags.clones):

@@ -255,23 +255,6 @@ rule:
   kind: list_comprehension
   pattern: '[$X for $X in $ITER]'
 ---
-id: list-comprehension-identity
-language: python
-severity: warning
-message: "`[x for x in iter]` identity transform - use `list(iter)` (or `list(filter(pred, iter))` if filtering)"
-metadata:
-  weight: 4
-  category: slop
-rule:
-  kind: list_comprehension
-  pattern: '[$ITEM for $ITEM in $ITER if $COND]'
-  not:
-    has:
-      kind: if_clause
-      has:
-        kind: identifier
-        pattern: $ITEM
----
 id: consecutive-append-calls
 language: python
 severity: warning

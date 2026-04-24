@@ -12,7 +12,7 @@ rule:
 ---
 id: isinstance-return-ladder
 language: python
-severity: warning
+severity: info
 message: "`isinstance` ladder returning literals - use dispatch dict `{Type: value}[type(x)]` or polymorphism"
 metadata:
   weight: 3
@@ -46,7 +46,7 @@ rule:
 ---
 id: nested-if-no-else
 language: python
-severity: warning
+severity: info
 message: "Nested `if` is the only statement in outer `if` body and neither has `else` - combine with `and` into a single condition"
 metadata:
   weight: 3
@@ -87,7 +87,7 @@ rule:
 ---
 id: nested-guard-invert
 language: python
-severity: warning
+severity: info
 message: "Nested `if` early-exit guard with sibling code in outer `if` body - invert outer to early-exit (`if not outer: return/continue`) and flatten the nesting"
 metadata:
   weight: 3
@@ -188,7 +188,7 @@ rule:
 ---
 id: repeated-if-return-error
 language: python
-severity: warning
+severity: info
 message: "Repeated `if: return error` checks - collect into one validator or raise"
 metadata:
   weight: 3
@@ -210,7 +210,7 @@ rule:
 ---
 id: repeated-validation-calls
 language: python
-severity: warning
+severity: info
 message: "Repeated `validate_*()` calls - loop over a list of validators"
 metadata:
   weight: 3
@@ -250,7 +250,7 @@ rule:
 ---
 id: value-compare-return-ladder
 language: python
-severity: warning
+severity: info
 message: "`if x == v1: return r1 elif x == v2: ...` - use `{v1: r1, v2: r2}.get(x, default)`"
 metadata:
   weight: 3
@@ -265,7 +265,7 @@ rule:
 ---
 id: repetitive-list-append-elif
 language: python
-severity: warning
+severity: info
 message: "`.append()` in each elif branch - compute value once then append, or dispatch"
 metadata:
   weight: 3
@@ -288,7 +288,7 @@ rule:
 ---
 id: consecutive-if-same-variable
 language: python
-severity: warning
+severity: info
 message: "Consecutive `if` on same variable - use `elif` (or return early after first branch)"
 metadata:
   weight: 3
@@ -316,7 +316,7 @@ rule:
 ---
 id: nested-attribute-guard-chain
 language: python
-severity: warning
+severity: info
 message: "Nested `if x: if x.y: if x.y.z:` - use try/except AttributeError, or extract a small helper"
 metadata:
   weight: 3
@@ -344,7 +344,7 @@ rule:
 ---
 id: repeated-isinstance-validation
 language: python
-severity: warning
+severity: info
 message: "Repeated `if not isinstance(x, T): raise` - use type hints or a schema validator"
 metadata:
   weight: 3
@@ -377,7 +377,7 @@ rule:
 ---
 id: ternary-none-comparison
 language: python
-severity: warning
+severity: info
 message: "`v if x is None else o` - rewrite as `o if x is not None else v` for natural reading"
 metadata:
   weight: 3
@@ -424,7 +424,7 @@ rule:
 ---
 id: if-none-raise
 language: python
-severity: warning
+severity: info
 message: "`if x is None: raise` - let natural `AttributeError`/`TypeError` surface, or enforce via type hint"
 metadata:
   weight: 2
@@ -500,7 +500,7 @@ rule:
 ---
 id: verbose-and-return
 language: python
-severity: warning
+severity: info
 message: "`if not x: return False` - combine with later condition or `return x and ...`"
 metadata:
   weight: 2
@@ -531,7 +531,7 @@ rule:
 ---
 id: verbose-or-return
 language: python
-severity: warning
+severity: info
 message: "`if x: return True` - combine with later condition or `return x or ...`"
 metadata:
   weight: 2
@@ -549,7 +549,7 @@ rule:
 ---
 id: defensive-isinstance-return
 language: python
-severity: warning
+severity: info
 message: "`if not isinstance(x, T): return err` - use type hints or a schema validator"
 metadata:
   weight: 2
@@ -614,31 +614,6 @@ rule:
   any:
   - pattern: $X if $X else []
   - pattern: $X if $X else {}
----
-id: isinstance-guard-raise
-language: python
-severity: warning
-message: "`if not isinstance(x, T): raise` - use type hints or duck-type via try/except"
-metadata:
-  weight: 2
-  category: slop
-rule:
-  kind: if_statement
-  all:
-  - has:
-      kind: not_operator
-      has:
-        kind: call
-        regex: isinstance\(
-  - has:
-      kind: block
-      has:
-        any:
-        - has:
-            kind: raise_statement
-        - has:
-            kind: call
-            regex: exit
 ---
 id: redundant-guard-same-return
 language: python
@@ -755,7 +730,7 @@ rule:
 ---
 id: tail-predicate-chain
 language: python
-severity: warning
+severity: info
 message: "Consecutive `if not x: return False` before a final return - collapse to `return x and y and ...`"
 metadata:
   weight: 4
@@ -815,7 +790,7 @@ rule:
 ---
 id: double-guard-same-value
 language: python
-severity: warning
+severity: info
 message: "`if not isinstance(x, T): raise` + `if not x: raise` - collapse to one guard (`or` the conditions or narrow via schema)"
 metadata:
   weight: 3
@@ -831,7 +806,7 @@ rule:
 ---
 id: tuple-value-err-caller-unpack
 language: python
-severity: warning
+severity: info
 message: "`v, err = f(...); if err: return err` - raise typed exceptions instead of Go-style `(value, err)` tuples"
 metadata:
   weight: 3
@@ -866,7 +841,7 @@ rule:
 ---
 id: isinstance-then-bound-check
 language: python
-severity: warning
+severity: info
 message: "`if not isinstance(x, int): raise` + `if x < N: raise` - one validator (`ensure_positive_int`) or `Annotated[int, Ge(N)]`"
 metadata:
   weight: 3

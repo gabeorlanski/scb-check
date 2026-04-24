@@ -49,6 +49,17 @@ class Findings:
 
 
 def analyze(files: tuple[Path, ...]) -> AnalysisResult:
+    """Run the full analysis pipeline over ``files``.
+
+    Parses each file with tree-sitter, runs clone detection, ast-grep slop
+    rules, and function extraction, then aggregates everything into a
+    ``Flags`` object plus the source text needed by the renderer.
+
+    Unparseable files are logged and skipped, not raised. Raises
+    ``IgnoreDirectiveError`` if any ``# scbc ignore[...]`` directive in the
+    scanned sources is malformed or references an unknown rule id.
+    """
+
     findings = _collect_findings(files)
     flags = _build_flags(
         clones=findings.clones,
@@ -112,12 +123,9 @@ def _apply_count_thresholds(
     if not thresholds:
         return ast_hits
 
-    counts: dict[tuple[str, Path], int] = {}
-    for hit in ast_hits:
-        if hit.rule_id in thresholds:
-            counts[(hit.rule_id, hit.file)] = (
-                counts.get((hit.rule_id, hit.file), 0) + 1
-            )
+    counts = Counter(
+        (hit.rule_id, hit.file) for hit in ast_hits if hit.rule_id in thresholds
+    )
 
     return tuple(
         hit
@@ -138,12 +146,11 @@ def _filter_ignored_ast_hits(
             for rule_id in directive.rule_ids
         )
 
-    filtered_hits: list[AstGrepHit] = []
-    for hit in ast_hits:
-        if ignored_rule_counts[(hit.file, hit.line, hit.rule_id)] > 0:
-            continue
-        filtered_hits.append(hit)
-    return tuple(filtered_hits)
+    return tuple(
+        hit
+        for hit in ast_hits
+        if ignored_rule_counts[(hit.file, hit.line, hit.rule_id)] <= 0
+    )
 
 
 def _build_flags(

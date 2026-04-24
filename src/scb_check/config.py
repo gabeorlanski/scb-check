@@ -13,11 +13,23 @@ class Config:
     context_lines: int = 1
 
 
-class ConfigError(ValueError):
+class ConfigError(ValueError):  # scbc ignore[empty-exception-subclass]
     pass
 
 
 def load_config(override_path: Path | None, cwd: Path) -> Config:
+    """Load scb-check configuration, walking up from ``cwd``.
+
+    If ``override_path`` is given it must exist. Otherwise ``cwd`` and
+    each parent are searched for ``scb-check.toml`` first, then
+    ``pyproject.toml`` with ``[tool.scb-check]``, ``[tool.ruff]``, or
+    ``[tool.ty.src]``. The walk stops at a ``.git`` directory or the
+    filesystem root; with no match, a default ``Config`` rooted at
+    ``cwd`` is returned. When ``pyproject.toml`` is the source, excludes
+    from the ruff and ty tables are merged into the scb-check excludes.
+    Raises ``ConfigError`` on malformed TOML or invalid values.
+    """
+
     path = _resolve_config_path(override_path, cwd)
     if path is None:
         return Config(exclude=(), base_dir=cwd, context_lines=1)
@@ -51,17 +63,12 @@ def _discover_config(start: Path) -> Path | None:
 def _pyproject_has_supported_config(path: Path) -> bool:
     data = _load_toml(path)
     tool = data.get("tool")
-    if not isinstance(tool, dict):
-        return False
-    if isinstance(tool.get("scb-check"), dict):
-        return True
-    if isinstance(tool.get("ruff"), dict):
-        return True
-
-    raw_ty = tool.get("ty")
-    if not isinstance(raw_ty, dict):
-        return False
-    return isinstance(raw_ty.get("src"), dict)
+    raw_ty = tool.get("ty") if isinstance(tool, dict) else None
+    return isinstance(tool, dict) and (
+        isinstance(tool.get("scb-check"), dict)
+        or isinstance(tool.get("ruff"), dict)
+        or (isinstance(raw_ty, dict) and isinstance(raw_ty.get("src"), dict))
+    )
 
 
 def _parse_config_file(path: Path) -> Config:

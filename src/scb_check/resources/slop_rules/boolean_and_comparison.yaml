@@ -31,7 +31,7 @@ rule:
 ---
 id: chained-none-check
 language: python
-severity: warning
+severity: info
 message: "`x is not None and y is not None` - use `all(v is not None for v in (x, y))` or try/except"
 metadata:
   weight: 2
@@ -53,7 +53,7 @@ rule:
 ---
 id: explicit-bool-cast
 language: python
-severity: warning
+severity: info
 message: "`bool(x)` - drop it, use truthiness directly in `if`/`and`/`or`"
 metadata:
   weight: 2
@@ -103,7 +103,7 @@ rule:
 ---
 id: redundant-none-empty-check
 language: python
-severity: warning
+severity: info
 message: "`x is not None and x != ''` - use `if x:` (empty string is also falsy)"
 metadata:
   weight: 2
@@ -171,7 +171,7 @@ rule:
 ---
 id: isinstance-bool-exclusion
 language: python
-severity: warning
+severity: info
 message: "`isinstance(x, bool)` - `bool` is an `int` subclass; reconsider whether you want type-specific handling"
 metadata:
   weight: 2
@@ -197,7 +197,7 @@ rule:
 ---
 id: bool-numeric-triple-guard
 language: python
-severity: warning
+severity: info
 message: isinstance bool guard combined with numeric isinstance - wrap in helper rather than inlining
 metadata:
   weight: 3

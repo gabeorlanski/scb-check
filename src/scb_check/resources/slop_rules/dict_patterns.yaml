@@ -19,7 +19,7 @@ rule:
 ---
 id: repeated-dict-key-assignment
 language: python
-severity: warning
+severity: info
 message: "Repeated `d[k] = f(...)` lines - use a loop or dict comprehension"
 metadata:
   weight: 3
@@ -37,7 +37,7 @@ rule:
 ---
 id: dict-get-zero-default
 language: python
-severity: warning
+severity: info
 message: "`d.get(k, 0)` - use a defaultdict(int) instead or a try/except KeyError guard."
 metadata:
   weight: 3
@@ -74,7 +74,7 @@ rule:
 ---
 id: dict-get-empty-list-default
 language: python
-severity: warning
+severity: info
 message: "`d.get(k, [])` - builds a fresh list each call; use `d.setdefault(k, [])` or `defaultdict(list)`"
 metadata:
   weight: 3
@@ -100,7 +100,7 @@ rule:
 ---
 id: dict-get-empty-dict-default
 language: python
-severity: warning
+severity: info
 message: "`d.get(k, {})` - builds a fresh dict each call; use `d.setdefault(k, {})` or `defaultdict(dict)`"
 metadata:
   weight: 3
@@ -227,7 +227,7 @@ rule:
 ---
 id: verbose-dict-elif-updates
 language: python
-severity: warning
+severity: info
 message: "`d[k] = v` in each if/elif branch - use a dispatch `{cond: (k, v)}` or helper"
 metadata:
   weight: 4
@@ -315,7 +315,7 @@ rule:
 ---
 id: dict-comprehension-from-keys
 language: python
-severity: warning
+severity: info
 message: "`dict.fromkeys(keys, val)` - use `{k: val for k in keys}` (and never with a mutable `val`, it is shared)"
 metadata:
   weight: 2
@@ -360,7 +360,7 @@ rule:
 ---
 id: get-then-none-check
 language: python
-severity: warning
+severity: info
 message: "`v = d.get(k); if v is None:` - use `if k in d:` or try/except KeyError"
 metadata:
   weight: 2
@@ -468,7 +468,7 @@ rule:
 ---
 id: update-if-present-dict
 language: python
-severity: warning
+severity: info
 message: "`if x is not None: updates[k] = x` for each arg - drop the optional defaulting or pass `**kwargs` through"
 metadata:
   weight: 3

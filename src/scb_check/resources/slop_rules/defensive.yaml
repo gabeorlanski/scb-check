@@ -1,0 +1,680 @@
+---
+id: defensive-fstring-raise-heavy
+language: python
+severity: warning
+message: "Function body has 3+ `raise ...(f'...{var}...')` statements; dense per-field validation belongs at the boundary, not in a helper."
+metadata:
+  weight: 4
+  category: slop
+  min_file_count: 2
+rule:
+  kind: function_definition
+  regex: 'raise\s+\w+[^)]*f"[^"]*\{[^}]*\}[\s\S]*raise\s+\w+[^)]*f"[^"]*\{[^}]*\}[\s\S]*raise\s+\w+[^)]*f"[^"]*\{[^}]*\}'
+---
+id: defensive-isinstance-raise-heavy
+language: python
+severity: warning
+message: "Function body runs 3+ `if not isinstance(...): raise` checks; these are boundary validations leaking into core logic."
+metadata:
+  weight: 4
+  category: slop
+  min_file_count: 2
+rule:
+  kind: function_definition
+  regex: 'if\s+not\s+isinstance\([^)]+\):[\s\S]*?raise[\s\S]*if\s+not\s+isinstance\([^)]+\):[\s\S]*?raise[\s\S]*if\s+not\s+isinstance\([^)]+\):[\s\S]*?raise'
+---
+id: defensive-none-return-heavy
+language: python
+severity: warning
+message: "Function body has 3+ `if … is None: return None` / `if not …: return None` guards; plumbing `None` through helpers is defensive slop."
+metadata:
+  weight: 4
+  category: slop
+  min_file_count: 2
+rule:
+  kind: function_definition
+  regex: '(if\s+\w[\w.]*\s+is\s+None:\s*\n\s+return\s+None[\s\S]*){3,}'
+---
+id: defensive-try-soup-function
+language: python
+severity: warning
+message: "Function body has 3+ `try/except` blocks — that is error-handling-as-control-flow. Rethink the contract or split the function."
+metadata:
+  weight: 4
+  category: slop
+  min_file_count: 2
+rule:
+  kind: function_definition
+  regex: '(try:[\s\S]*?except[\s\S]*?){3,}'
+---
+id: defensive-except-exception-heavy
+language: python
+severity: warning
+message: "Function body has 2+ `except Exception:` / bare `except:` clauses; catching-everything multiple times in one function is a paranoia smell."
+metadata:
+  weight: 4
+  category: slop
+  min_file_count: 2
+rule:
+  kind: function_definition
+  regex: '(except\s+Exception[\s:][\s\S]*){2,}'
+---
+id: defensive-validator-function
+language: python
+severity: warning
+message: "Function body runs `if not isinstance(...): raise …` plus returns; this is a boundary validator living inside core logic. Validate once at the entrypoint, not per helper."
+metadata:
+  weight: 4
+  category: slop
+  min_file_count: 2
+rule:
+  kind: function_definition
+  all:
+    - has:
+        field: body
+        kind: block
+        has:
+          stopBy: end
+          kind: if_statement
+          any:
+            - pattern: |
+                if not isinstance($V, $T):
+                    raise $$$A
+            - pattern: |
+                if not isinstance($V, ($$$T)):
+                    raise $$$A
+    - has:
+        field: body
+        kind: block
+        has:
+          stopBy: end
+          kind: raise_statement
+          has:
+            stopBy: end
+            kind: string
+            regex: '\{[^}]*\}'
+---
+id: defensive-validator-returnmix
+language: python
+severity: warning
+message: "Function combines `isinstance` guards with `is None` guards and returns; stop per-field validation — assert the contract at the boundary."
+metadata:
+  weight: 4
+  category: slop
+  min_file_count: 2
+rule:
+  kind: function_definition
+  all:
+    - has:
+        field: body
+        kind: block
+        has:
+          stopBy: end
+          kind: if_statement
+          any:
+            - pattern: |
+                if not isinstance($V, $T):
+                    return $$$A
+            - pattern: |
+                if not isinstance($V, ($$$T)):
+                    return $$$A
+    - has:
+        field: body
+        kind: block
+        has:
+          stopBy: end
+          kind: if_statement
+          any:
+            - pattern: |
+                if $V2 is None:
+                    return $$$A
+            - pattern: |
+                if not $V2:
+                    return $$$A
+---
+id: defensive-function-isinstance-heavy
+language: python
+severity: warning
+message: "Function has 2+ `isinstance` checks in its body; inline type-policing is defensive slop. Validate at the boundary, then trust the type."
+metadata:
+  weight: 5
+  category: slop
+  min_file_count: 2
+rule:
+  kind: function_definition
+  all:
+    - has:
+        field: body
+        kind: block
+        has:
+          stopBy: end
+          kind: call
+          regex: '^isinstance\('
+    - has:
+        field: body
+        kind: block
+        has:
+          stopBy: end
+          kind: if_statement
+          pattern: |
+            if not isinstance($V, $T):
+                $$$A
+    - has:
+        field: body
+        kind: block
+        has:
+          stopBy: end
+          kind: if_statement
+          any:
+            - pattern: |
+                if isinstance($V, $T):
+                    $$$A
+            - pattern: |
+                if not isinstance($V, $T):
+                    $$$A
+          precedes:
+            stopBy: end
+            kind: if_statement
+            any:
+              - pattern: |
+                  if isinstance($V2, $T2):
+                      $$$B
+              - pattern: |
+                  if not isinstance($V2, $T2):
+                      $$$B
+---
+id: defensive-function-nullable-heavy
+language: python
+severity: warning
+message: "Function has 2+ `if … is None: return/raise` guards threaded through its body; normalize nullability at the boundary, don't plumb `None`."
+metadata:
+  weight: 5
+  category: slop
+  min_file_count: 2
+rule:
+  kind: function_definition
+  has:
+    field: body
+    kind: block
+    all:
+      - has:
+          stopBy: end
+          kind: if_statement
+          any:
+            - pattern: |
+                if $V is None:
+                    return $$$A
+            - pattern: |
+                if $V is None:
+                    raise $$$A
+      - has:
+          stopBy: end
+          kind: if_statement
+          any:
+            - pattern: |
+                if $V2 is None:
+                    return $$$A
+            - pattern: |
+                if $V2 is None:
+                    raise $$$A
+          precedes:
+            stopBy: end
+            kind: if_statement
+            any:
+              - pattern: |
+                  if $V3 is None:
+                      return $$$A
+              - pattern: |
+                  if $V3 is None:
+                      raise $$$A
+---
+id: type-probe-ladder
+language: python
+severity: warning
+message: "Two `if isinstance(same_var, T): …` branches back-to-back are a type-probe ladder; use a dispatch table or polymorphism."
+metadata:
+  weight: 4
+  category: slop
+rule:
+  kind: if_statement
+  all:
+    - pattern: |
+        if isinstance($V, $T1):
+            $$$A
+    - precedes:
+        stopBy: neighbor
+        kind: if_statement
+        pattern: |
+          if isinstance($V, $T2):
+              $$$B
+---
+id: multi-none-or-chain
+language: python
+severity: warning
+message: "`if a is None or b is None [or c is None]: return/raise/continue` is defensive multi-arg null policing; normalize nullability at the boundary."
+metadata:
+  weight: 4
+  category: slop
+rule:
+  kind: if_statement
+  all:
+    - regex: 'is None\s+or\s+\w[\w.]*\s+is None'
+    - has:
+        field: consequence
+        kind: block
+        has:
+          stopBy: neighbor
+          any:
+            - kind: return_statement
+            - kind: raise_statement
+            - kind: continue_statement
+---
+id: isinstance-guard-raise
+language: python
+severity: warning
+message: "Inline `if not isinstance(x, T): raise …` guards police caller types in core logic; validate at the boundary and trust the type."
+metadata:
+  weight: 4
+  category: slop
+  min_file_count: 2
+rule:
+  kind: if_statement
+  any:
+    - pattern: |
+        if not isinstance($VALUE, $TYPE):
+            raise $$$ARGS
+    - pattern: |
+        if not isinstance($VALUE, ($$$TYPES)):
+            raise $$$ARGS
+---
+id: isinstance-return-constructor
+language: python
+severity: warning
+message: "`if isinstance(x, T): return T(x)` re-wraps a value already of the target type; drop the guard and the wrap."
+metadata:
+  weight: 4
+  category: slop
+rule:
+  kind: if_statement
+  any:
+    - pattern: |
+        if isinstance($VALUE, $TYPE):
+            return $TYPE($VALUE)
+    - pattern: |
+        if isinstance($VALUE, $TYPE):
+            return $TYPE($$$ARGS)
+---
+id: wrap-raise-fstring
+language: python
+severity: warning
+message: "`except X as e: raise MyError(f'…: {e}') from e` renames exceptions for cosmetics; let the original propagate or catch something specific."
+metadata:
+  weight: 4
+  category: slop
+  min_file_count: 2
+rule:
+  kind: except_clause
+  all:
+    - regex: '^except\s+(Exception|BaseException|OSError|ValueError|TypeError|RuntimeError|KeyError|IndexError|AttributeError|ArithmeticError)(\s+as\s+\w+)?\s*:'
+    - has:
+        stopBy: neighbor
+        kind: block
+        all:
+          - has:
+              stopBy: neighbor
+              kind: raise_statement
+              has:
+                stopBy: end
+                kind: string
+                regex: '\{[^}]*\}'
+          - not:
+              has:
+                stopBy: neighbor
+                not:
+                  any:
+                    - kind: raise_statement
+                    - kind: comment
+---
+id: except-return-static-sentinel
+language: python
+severity: warning
+message: "`except Exception: return None/False/[]/{}` is bare-exception-to-sentinel; catch something specific or let it propagate."
+metadata:
+  weight: 5
+  category: slop
+  min_file_count: 2
+rule:
+  kind: except_clause
+  all:
+    - any:
+        - regex: '^except\s*:'
+        - regex: '^except\s+(Exception|BaseException)(\s+as\s+\w+)?\s*:'
+    - has:
+        stopBy: neighbor
+        kind: block
+        all:
+          - has:
+              stopBy: neighbor
+              kind: return_statement
+              regex: '^return\s+(None|False|True|\[\]|\{\}|""|0|\(\)|set\(\))\s*$'
+          - not:
+              has:
+                stopBy: neighbor
+                not:
+                  any:
+                    - kind: return_statement
+                    - kind: comment
+---
+id: triple-attr-none-default-chain
+language: python
+severity: info
+message: "`x = data.get(k, d1) or d2` double-guards a `.get` miss; pick one default path."
+metadata:
+  weight: 3
+  category: slop
+  min_file_count: 2
+rule:
+  kind: assignment
+  any:
+    - pattern: |
+        $X = $DATA.get($KEY, $D1) or $D2
+    - pattern: |
+        $X = $DATA.get($KEY) or $DATA.get($KEY2) or $FALLBACK
+---
+id: redundant-coerce-to-str
+language: python
+severity: info
+message: "`str(x) if x is not None else ''` coerces a typed value; trust the annotation."
+metadata:
+  weight: 3
+  category: slop
+  min_file_count: 2
+rule:
+  kind: conditional_expression
+  any:
+    - pattern: 'str($X) if $X is not None else ""'
+    - pattern: "str($X) if $X is not None else ''"
+    - pattern: 'str($X) if isinstance($X, str) else ""'
+    - pattern: "str($X) if isinstance($X, str) else ''"
+---
+id: none-continue-in-loop
+language: python
+severity: warning
+message: "`if x is None: continue` inside a loop is defensive null-skipping; filter at the source or raise on contract violation."
+metadata:
+  weight: 3
+  category: slop
+  min_file_count: 2
+rule:
+  kind: if_statement
+  pattern: |
+    if $X is None:
+        continue
+  inside:
+    stopBy: end
+    any:
+      - kind: for_statement
+      - kind: while_statement
+---
+id: parse-and-fallback-exception
+language: python
+severity: warning
+message: "`try: return int/float/json.loads(x) except Exception: return <default>` parse-with-silent-fallback swallows format errors."
+metadata:
+  weight: 5
+  category: slop
+  min_file_count: 2
+rule:
+  kind: try_statement
+  all:
+    - has:
+        stopBy: neighbor
+        kind: block
+        has:
+          stopBy: neighbor
+          kind: return_statement
+          any:
+            - regex: '^return\s+int\('
+            - regex: '^return\s+float\('
+            - regex: '^return\s+bool\('
+            - regex: '^return\s+json\.loads?\('
+            - regex: '^return\s+ast\.literal_eval\('
+    - has:
+        stopBy: neighbor
+        kind: except_clause
+        regex: '^except\s+(Exception|BaseException|ValueError|TypeError)(\s+as\s+\w+)?\s*:'
+---
+id: return-none-guard-ladder
+language: python
+severity: warning
+message: "Back-to-back `if …: return None` guard clauses treat Optional as a pervasive escape hatch; normalize nullability at the boundary."
+metadata:
+  weight: 4
+  category: slop
+  min_file_count: 2
+rule:
+  kind: if_statement
+  all:
+    - has:
+        field: consequence
+        kind: block
+        all:
+          - has:
+              stopBy: neighbor
+              kind: return_statement
+              regex: '^return\s+None\s*$'
+          - not:
+              has:
+                stopBy: neighbor
+                not:
+                  any:
+                    - kind: return_statement
+                    - kind: comment
+    - precedes:
+        stopBy: neighbor
+        kind: if_statement
+        has:
+          field: consequence
+          kind: block
+          all:
+            - has:
+                stopBy: neighbor
+                kind: return_statement
+                regex: '^return\s+None\s*$'
+            - not:
+                has:
+                  stopBy: neighbor
+                  not:
+                    any:
+                      - kind: return_statement
+                      - kind: comment
+---
+id: raise-guard-ladder
+language: python
+severity: warning
+message: "Back-to-back `if <cond>: raise ...` guard clauses that raise different error messages are defensive input policing; push validation to the boundary."
+metadata:
+  weight: 4
+  category: slop
+  min_file_count: 2
+rule:
+  kind: if_statement
+  all:
+    - has:
+        field: consequence
+        kind: block
+        all:
+          - has:
+              stopBy: neighbor
+              kind: raise_statement
+          - not:
+              has:
+                stopBy: neighbor
+                not:
+                  any:
+                    - kind: raise_statement
+                    - kind: comment
+    - precedes:
+        stopBy: neighbor
+        kind: if_statement
+        has:
+          field: consequence
+          kind: block
+          all:
+            - has:
+                stopBy: neighbor
+                kind: raise_statement
+            - not:
+                has:
+                  stopBy: neighbor
+                  not:
+                    any:
+                      - kind: raise_statement
+                      - kind: comment
+---
+id: function-with-many-type-guards
+language: python
+severity: warning
+message: "Function has 3+ `if not isinstance / if x is None: raise` guard clauses before doing work; validate at the boundary and trust the type downstream."
+metadata:
+  weight: 5
+  category: slop
+  min_file_count: 2
+rule:
+  kind: function_definition
+  has:
+    field: body
+    kind: block
+    all:
+      - has:
+          stopBy: neighbor
+          kind: if_statement
+          any:
+            - pattern: |
+                if not isinstance($V1, $T1):
+                    raise $$$A1
+            - pattern: |
+                if not isinstance($V1, ($$$T1)):
+                    raise $$$A1
+      - has:
+          stopBy: neighbor
+          kind: if_statement
+          any:
+            - pattern: |
+                if not isinstance($V2, $T2):
+                    raise $$$A2
+            - pattern: |
+                if not isinstance($V2, ($$$T2)):
+                    raise $$$A2
+---
+id: sentinel-fallback-function
+language: python
+severity: warning
+message: "Whole-function `try: <work>; except Exception: return None/False/[]/{}` swallows every error and returns a sentinel; catch specifically or let it propagate."
+metadata:
+  weight: 6
+  category: slop
+  min_file_count: 2
+rule:
+  kind: function_definition
+  has:
+    field: body
+    kind: block
+    all:
+      - has:
+          stopBy: neighbor
+          kind: try_statement
+          all:
+            - has:
+                stopBy: neighbor
+                kind: except_clause
+                all:
+                  - any:
+                      - regex: '^except\s*:'
+                      - regex: '^except\s+(Exception|BaseException)(\s+as\s+\w+)?\s*:'
+                  - has:
+                      stopBy: neighbor
+                      kind: block
+                      all:
+                        - has:
+                            stopBy: neighbor
+                            kind: return_statement
+                            regex: '^return\s+(None|False|True|\[\]|\{\}|""|0|\(\)|set\(\))\s*$'
+                        - not:
+                            has:
+                              stopBy: neighbor
+                              not:
+                                any:
+                                  - kind: return_statement
+                                  - kind: comment
+      - not:
+          has:
+            stopBy: neighbor
+            any:
+              - kind: for_statement
+              - kind: while_statement
+              - kind: match_statement
+              - kind: with_statement
+---
+id: dispatch-by-string-equality
+language: python
+severity: warning
+message: "Long `if op == \"X\":` / `elif op == \"Y\":` string-equality dispatch is open-coded command routing; use a `{name: handler}` table."
+metadata:
+  weight: 4
+  category: slop
+  min_file_count: 2
+rule:
+  kind: if_statement
+  all:
+    - any:
+        - regex: '^if\s+\w+\s*==\s*"[A-Z_][A-Z0-9_]*"'
+        - regex: "^if\\s+\\w+\\s*==\\s*'[A-Z_][A-Z0-9_]*'"
+    - precedes:
+        stopBy: neighbor
+        kind: if_statement
+        any:
+          - regex: '^if\s+\w+\s*==\s*"[A-Z_][A-Z0-9_]*"'
+          - regex: "^if\\s+\\w+\\s*==\\s*'[A-Z_][A-Z0-9_]*'"
+---
+id: go-style-err-tuple-return
+language: python
+severity: warning
+message: "`return None, error_msg` / `return None, None` Go-style dual-return open-codes an ad-hoc result type; raise exceptions or use a real result object."
+metadata:
+  weight: 5
+  category: slop
+  min_file_count: 2
+rule:
+  kind: return_statement
+  any:
+    - pattern: 'return None, None'
+    - pattern: 'return None, $MSG'
+    - pattern: 'return False, $MSG'
+    - pattern: 'return True, $MSG'
+  not:
+    any:
+      - has:
+          stopBy: end
+          kind: call
+---
+id: len-arity-raise
+language: python
+severity: info
+message: "`if len(args) != N: raise …` open-codes arity checks; bind via parameters or `*args` unpacking so the error is structural."
+metadata:
+  weight: 3
+  category: slop
+  min_file_count: 2
+rule:
+  kind: if_statement
+  any:
+    - pattern: |
+        if len($ARGS) != $N:
+            raise $$$A
+    - pattern: |
+        if len($ARGS) < $N:
+            raise $$$A
+    - pattern: |
+        if len($ARGS) > $N:
+            raise $$$A

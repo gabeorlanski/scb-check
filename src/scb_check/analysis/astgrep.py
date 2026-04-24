@@ -12,6 +12,15 @@ logger = get_logger(__name__)
 
 
 def run_sg(files: tuple[Path, ...], rules_path: Path) -> tuple[AstGrepHit, ...]:
+    """Invoke the ``sg`` binary against ``files`` using ``rules_path``.
+
+    Returns an empty tuple — never raises — when the binary is missing,
+    the subprocess fails, the exit code is non-zero, or the JSON payload
+    is unparseable. A missing ``sg`` is treated as a degraded run, not a
+    hard failure, so scb-check still produces clone and erosion numbers.
+    Line and column numbers in the returned hits are 1-indexed.
+    """
+
     if not files or not rules_path.exists():
         logger.warning(
             "no files to scan or rules file missing",

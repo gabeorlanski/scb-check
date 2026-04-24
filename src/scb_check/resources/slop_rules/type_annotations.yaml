@@ -1,7 +1,7 @@
 ---
 id: generic-with-any
 language: python
-severity: warning
+severity: info
 message: "`<Container>[..., Any, ...]` - specify concrete element types or use a `TypedDict`/`@dataclass`/`Protocol`"
 metadata:
   weight: 2
@@ -78,7 +78,7 @@ rule:
 ---
 id: callable-any-return
 language: python
-severity: warning
+severity: info
 message: "`Callable[..., Any]` - specify the return type; `...` already erases the parameter signature"
 metadata:
   weight: 2
@@ -94,7 +94,7 @@ rule:
 ---
 id: object-type-annotation
 language: python
-severity: warning
+severity: info
 message: "`object` annotation - use a concrete type, `Protocol`, or `Any`"
 metadata:
   weight: 2

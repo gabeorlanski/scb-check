@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -51,7 +52,18 @@ def detect_clones(
     files: tuple[tuple[Path, str, Tree], ...],
     min_lines: int = 3,
 ) -> tuple[CloneBlock, ...]:
-    groups: dict[str, list[_CloneCandidate]] = {}
+    """Find duplicated AST blocks across ``files``.
+
+    Only node types in ``CLONE_NODE_TYPES`` (function defs, loops, ``if``,
+    ``try``, ``with``, ``match``) spanning at least ``min_lines`` lines are
+    considered. Identifiers and literals are normalized before hashing so
+    blocks that differ only in variable names or literal values still
+    collide. A group must contain at least two instances to be emitted;
+    each instance is returned as its own ``CloneBlock`` sharing a
+    ``group_hash``.
+    """
+
+    groups: defaultdict[str, list[_CloneCandidate]] = defaultdict(list)
     for file_path, source, tree in files:
         for candidate in _iter_clone_candidates(
             file_path,
@@ -59,7 +71,7 @@ def detect_clones(
             tree,
             min_lines,
         ):
-            groups.setdefault(candidate.group_hash, []).append(candidate)
+            groups[candidate.group_hash].append(candidate)
 
     clones: list[CloneBlock] = []
     for hash_value, candidates in sorted(groups.items()):
@@ -160,10 +172,13 @@ def _normalize_ast(node: Node) -> str:
         if current.type in _LITERAL_TOKENS:
             return _LITERAL_TOKENS[current.type]
 
-        if not current.named_children:
+        children = tuple(
+            child for child in current.children if child.type != "comment"
+        )
+        if not children:
             return current.type
 
-        children = [normalize(child) for child in current.named_children]
-        return f"{current.type}({','.join(children)})"
+        normalized_children = [normalize(child) for child in children]
+        return f"{current.type}({','.join(normalized_children)})"
 
     return normalize(node)

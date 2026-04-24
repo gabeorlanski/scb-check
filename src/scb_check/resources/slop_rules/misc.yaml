@@ -44,7 +44,7 @@ rule:
 ---
 id: redundant-return-none
 language: python
-severity: warning
+severity: info
 message: "`return None` at end of function - drop it, `None` returns implicitly"
 metadata:
   weight: 2
@@ -156,7 +156,7 @@ rule:
 ---
 id: pragma-no-cover-defensive
 language: python
-severity: warning
+severity: info
 message: pragma no cover suppresses coverage on dead branches; remove the branch instead
 metadata:
   weight: 3
@@ -226,7 +226,7 @@ rule:
 ---
 id: section-banner-comment
 language: python
-severity: warning
+severity: info
 message: Decorative section banner comment - delete, let structure speak for itself
 metadata:
   weight: 2
@@ -316,7 +316,7 @@ constraints:
 ---
 id: empty-exception-subclass
 language: python
-severity: warning
+severity: info
 message: "Empty Error/Exception/Warning subclass - use one base error and pass context in the message"
 metadata:
   weight: 2

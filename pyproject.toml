@@ -94,3 +94,13 @@ ignore = [
 "**/__init__.py" = ["E402"]
 "!src/**.py" = ["D"]
 "tests/**.py" = ["S101"]
+
+[tool.vulture]
+paths = ["src/scb_check"]
+min_confidence = 80
+exclude = [
+    ".venv",
+    ".pytest_cache",
+    "scratch",
+    "tests/fixtures",
+]
