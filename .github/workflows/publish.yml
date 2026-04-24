@@ -1,0 +1,151 @@
+name: Publish
+
+on:
+  release:
+    types: [published]
+
+permissions: {}
+
+concurrency:
+  group: publish-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish package
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+    environment: pypi
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify release commit is on main
+        run: git merge-base --is-ancestor HEAD origin/main
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
+        with:
+          version: "0.8.4"
+          enable-cache: false
+
+      - name: Install Python
+        run: uv python install 3.13
+
+      - name: Verify release tag matches package version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          uv run --no-project --python 3.13 python - <<'PY'
+          import os
+          import tomllib
+          from pathlib import Path
+
+          tag = os.environ["RELEASE_TAG"]
+          version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
+          expected_tag = f"v{version}"
+
+          if tag != expected_tag:
+              raise SystemExit(
+                  f"release tag {tag!r} does not match package version {expected_tag!r}"
+              )
+          PY
+
+      - name: Verify PyPI version is new
+        run: |
+          uv run --no-project --python 3.13 python - <<'PY'
+          import tomllib
+          import urllib.error
+          import urllib.request
+          from pathlib import Path
+
+          project = tomllib.loads(Path("pyproject.toml").read_text())["project"]
+          name = project["name"]
+          version = project["version"]
+          url = f"https://pypi.org/pypi/{name}/{version}/json"
+          request = urllib.request.Request(url, headers={"Accept": "application/json"})
+
+          try:
+              with urllib.request.urlopen(request, timeout=10):
+                  pass
+          except urllib.error.HTTPError as exc:
+              if exc.code == 404:
+                  print(f"{name} {version} is not published yet")
+              else:
+                  raise
+          else:
+              raise SystemExit(f"{name} {version} already exists on PyPI")
+          PY
+
+      - name: Install locked dependencies
+        run: uv sync --locked --all-groups --python 3.13
+
+      - name: Verify exported hash locks are current
+        run: |
+          uv export --format requirements.txt --no-dev --no-emit-project --frozen --output-file requirements.lock
+          uv export --format requirements.txt --all-groups --no-emit-project --frozen --output-file requirements-dev.lock
+          git diff --exit-code -- requirements.lock requirements-dev.lock
+
+      - name: Run quality gate
+        run: |
+          uv run ruff check .
+          uv run ty check .
+          uv run pytest
+          uv run scb-check check .
+          uv run vulture
+
+      - name: Build package
+        run: |
+          rm -rf dist/
+          uv build --no-build-isolation
+
+      - name: Inspect wheel contents
+        run: |
+          uv run --no-project --python 3.13 python - <<'PY'
+          import zipfile
+          from collections import Counter
+          from pathlib import Path
+
+          wheels = tuple(Path("dist").glob("*.whl"))
+          sdists = tuple(Path("dist").glob("*.tar.gz"))
+
+          if len(wheels) != 1:
+              raise SystemExit(f"expected one wheel, found {wheels}")
+          if len(sdists) != 1:
+              raise SystemExit(f"expected one sdist, found {sdists}")
+
+          with zipfile.ZipFile(wheels[0]) as wheel:
+              names = wheel.namelist()
+
+          duplicates = [name for name, count in Counter(names).items() if count > 1]
+          if duplicates:
+              raise SystemExit(f"wheel contains duplicate entries: {duplicates}")
+
+          rule_files = [
+              name
+              for name in names
+              if name.startswith("scb_check/resources/slop_rules/")
+              and name.endswith(".yaml")
+          ]
+          if len(rule_files) != 8:
+              raise SystemExit(f"expected 8 bundled rule files, found {len(rule_files)}")
+          PY
+
+      - name: Smoke-test wheel install
+        run: |
+          uv venv --seed --python 3.13 .smoke-venv
+          .smoke-venv/bin/python -m pip install --require-hashes -r requirements.lock
+          .smoke-venv/bin/python -m pip install --no-deps dist/*.whl
+          .smoke-venv/bin/scb-check --help
+
+      - name: Publish to PyPI
+        run: uv publish --trusted-publishing always

@@ -1,42 +1,44 @@
 [build-system]
-requires = ["hatchling>=1.27.0"]
+requires = ["hatchling==1.27.0"]
 build-backend = "hatchling.build"
 
 [project]
 name = "scb-check"
 version = "0.1.0"
-description = "ASAP MVP for SCBench verbosity and erosion metrics"
+description = "CLI for measuring verbosity and erosion metrics in Python codebases"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
-    "ast-grep-cli>=0.42.1",
-    "typer>=0.16.0",
-    "structlog>=25.4.0",
-    "tree-sitter>=0.25.0",
-    "tree-sitter-python>=0.25.0",
-    "pyyaml>=6.0.2",
-    "pydantic>=2.13.3",
+    "ast-grep-cli==0.42.1",
+    "typer==0.24.2",
+    "structlog==25.5.0",
+    "tree-sitter==0.25.2",
+    "tree-sitter-python==0.25.0",
+    "pyyaml==6.0.3",
+    "pydantic==2.13.3",
 ]
+
+[project.urls]
+Repository = "https://github.com/gabeorlanski/scb-check"
+Issues = "https://github.com/gabeorlanski/scb-check/issues"
 
 [project.scripts]
 scb-check = "scb_check.cli:main"
 
 [dependency-groups]
 dev = [
-    "pre-commit>=4.6.0",
-    "pytest>=8.4.2",
-    "pytest-snapshot>=0.9.0",
-    "ruff>=0.14.3",
-    "ty>=0.0.14",
-    "vulture>=2.16",
+    "hatchling==1.27.0",
+    "pre-commit==4.6.0",
+    "pytest==9.0.3",
+    "pytest-snapshot==0.9.0",
+    "ruff==0.15.11",
+    "ty==0.0.32",
+    "vulture==2.16",
 ]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/scb_check"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"src/scb_check/resources/slop_rules" = "scb_check/resources/slop_rules"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

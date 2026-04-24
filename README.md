@@ -3,6 +3,7 @@
 Python CLI that reports SCBench verbosity and erosion composites for a Python codebase.
 
 - [Paper](https://arxiv.org/abs/2603.24755)
+- [Source](https://github.com/gabeorlanski/scb-check)
 - [SlopCodeBench (main repo)](https://github.com/SprocketLab/slop-code-bench)
 
 - **Verbosity**: fraction of SLOC flagged by clone detection or ast-grep slop rules.
@@ -17,7 +18,7 @@ Run without installing (recommended):
 
 ```bash
 uvx scb-check check PATH
-uvx --from git+https://github.com/SprocketLab/scb-check scb-check check PATH
+uvx --from git+https://github.com/gabeorlanski/scb-check scb-check check PATH
 ```
 
 Or install into the current project:
@@ -25,6 +26,20 @@ Or install into the current project:
 ```bash
 uv sync              # for development in this repo
 uv add scb-check     # as a dependency elsewhere
+```
+
+For hash-checked dependency installs from this repository, use the exported lock files:
+
+```bash
+python -m pip install --require-hashes -r requirements.lock
+python -m pip install --require-hashes -r requirements-dev.lock
+```
+
+Regenerate them after dependency changes with:
+
+```bash
+uv export --format requirements.txt --no-dev --no-emit-project --frozen --output-file requirements.lock
+uv export --format requirements.txt --all-groups --no-emit-project --frozen --output-file requirements-dev.lock
 ```
 
 ## Usage
