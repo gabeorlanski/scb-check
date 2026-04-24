@@ -1,3 +1,5 @@
+"""Register and implement the `scb-check rule` command."""
+
 from __future__ import annotations
 
 import io
@@ -10,6 +12,8 @@ from scb_check.resources import rule_texts
 
 
 def register_rule(app: typer.Typer) -> None:
+    """Register the `rule` subcommand on `app`."""
+
     @app.command("rule")
     def rule(
         rule_name: Annotated[str, typer.Argument(help="ast-grep rule id")],

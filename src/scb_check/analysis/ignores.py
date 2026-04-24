@@ -1,3 +1,5 @@
+"""Parse `scbc` source directives for ast-grep filtering."""
+
 from __future__ import annotations
 
 import re
@@ -11,12 +13,14 @@ from token import NEWLINE
 from token import NL
 from tokenize import TokenError
 from tokenize import generate_tokens
+from typing import NamedTuple
 
 import yaml
 
-DIRECTIVE_RE = re.compile(
-    r"^scbc\s+ignore\[(?P<rule_ids>[^\]]*)\].*$"
+IGNORE_DIRECTIVE_RE = re.compile(
+    r"^scbc\s+ignore\[(?P<rule_ids>[^\]]*)\].*$",
 )
+BOUNDARY_DIRECTIVE_RE = re.compile(r"^scbc\s+boundary(?:[:\s].*)?$")
 NON_CODE_TOKEN_TYPES = frozenset(
     {
         COMMENT,
@@ -25,12 +29,15 @@ NON_CODE_TOKEN_TYPES = frozenset(
         INDENT,
         NEWLINE,
         NL,
-    }
+    },
 )
+_TOKEN_ERROR_LOCATION_ARG = 2
 
 
 @dataclass(frozen=True, slots=True)
 class IgnoreDirective:
+    """A source comment that suppresses ast-grep rules on target code."""
+
     file: Path
     directive_line: int
     target_line: int
@@ -38,19 +45,27 @@ class IgnoreDirective:
 
 
 class IgnoreDirectiveError(ValueError):  # scbc ignore[empty-exception-subclass]
-    pass
+    """Raised when source directives are malformed or invalid."""
+
+
+class BoundaryDirective(NamedTuple):
+    """A source comment that suppresses ast-grep findings in a function."""
+
+    file: Path
+    directive_line: int
 
 
 def parse_ignore_directives(
     source_by_file: dict[Path, str],
     rules_path: Path,
 ) -> tuple[IgnoreDirective, ...]:
+    """Return validated `scbc ignore[...]` directives from source files."""
     valid_rule_ids = _load_valid_rule_ids(rules_path)
 
     directives: list[IgnoreDirective] = []
     errors: list[str] = []
     for file_path, source in sorted(
-        source_by_file.items(), key=lambda item: item[0].as_posix()
+        source_by_file.items(), key=lambda item: item[0].as_posix(),
     ):
         file_directives, file_errors = _parse_file_directives(
             file_path,
@@ -71,7 +86,7 @@ def _load_valid_rule_ids(rules_path: Path) -> frozenset[str]:
             documents = tuple(yaml.safe_load_all(rules_file))
     except (OSError, yaml.YAMLError) as exc:
         raise IgnoreDirectiveError(
-            f"failed to load ast-grep rules: {exc}"
+            f"failed to load ast-grep rules: {exc}",
         ) from exc
 
     rule_ids: set[str] = set()
@@ -84,7 +99,7 @@ def _load_valid_rule_ids(rules_path: Path) -> frozenset[str]:
 
     if not rule_ids:
         raise IgnoreDirectiveError(
-            f"failed to load ast-grep rules: no rule ids found in {rules_path}"
+            f"failed to load ast-grep rules: no rule ids found in {rules_path}",
         )
     return frozenset(rule_ids)
 
@@ -110,7 +125,7 @@ def _parse_file_directives(
     valid_rule_ids: frozenset[str],
 ) -> tuple[tuple[IgnoreDirective, ...], tuple[str, ...]]:
     try:
-        comments_by_line, code_lines, matches = _scan_directives(source)
+        scan = _scan_directives(source)
     except TokenError as exc:
         return (), (
             _format_error(
@@ -122,7 +137,7 @@ def _parse_file_directives(
 
     directives: list[IgnoreDirective] = []
     errors: list[str] = []
-    for directive_line, directive in matches:
+    for directive_line, directive in scan.ignore_matches:
         rule_ids_text = directive
         rule_ids, rule_errors = _validated_rule_ids(
             file_path,
@@ -134,8 +149,8 @@ def _parse_file_directives(
             errors.extend(rule_errors)
         target_line = _get_target_line(
             directive_line,
-            comments_by_line,
-            code_lines,
+            scan.comments_by_line,
+            scan.code_lines,
         )
         if target_line is None:
             errors.append(
@@ -143,7 +158,7 @@ def _parse_file_directives(
                     file_path,
                     directive_line,
                     "scbc ignore has no target code line",
-                )
+                ),
             )
 
         if rule_errors or target_line is None:
@@ -155,18 +170,56 @@ def _parse_file_directives(
                 directive_line=directive_line,
                 target_line=target_line,
                 rule_ids=rule_ids,
-            )
+            ),
         )
 
     return tuple(directives), tuple(errors)
 
 
-def _scan_directives(
-    source: str,
-) -> tuple[dict[int, tuple[str, bool]], set[int], tuple[tuple[int, str], ...]]:
+def parse_boundary_directives(
+    source_by_file: dict[Path, str],
+) -> tuple[BoundaryDirective, ...]:
+    """Return `scbc boundary` directives from source files."""
+    directives: list[BoundaryDirective] = []
+    errors: list[str] = []
+    for file_path, source in sorted(
+        source_by_file.items(), key=lambda item: item[0].as_posix(),
+    ):
+        try:
+            scan = _scan_directives(source)
+        except TokenError as exc:
+            errors.append(
+                _format_error(
+                    file_path,
+                    _token_error_line(exc),
+                    f"failed to parse boundary directives: {exc}",
+                ),
+            )
+            continue
+
+        directives.extend(
+            BoundaryDirective(file=file_path, directive_line=directive_line)
+            for directive_line in scan.boundary_lines
+        )
+
+    if errors:
+        raise IgnoreDirectiveError("\n".join(errors))
+    return tuple(directives)
+
+
+@dataclass(frozen=True, slots=True)
+class _DirectiveScan:
+    comments_by_line: dict[int, tuple[str, bool]]
+    code_lines: set[int]
+    ignore_matches: tuple[tuple[int, str], ...]
+    boundary_lines: tuple[int, ...]
+
+
+def _scan_directives(source: str) -> _DirectiveScan:
     comments: dict[int, tuple[str, bool]] = {}
     code_lines: set[int] = set()
-    matches: list[tuple[int, str]] = []
+    ignore_matches: list[tuple[int, str]] = []
+    boundary_lines: list[int] = []
 
     for token in generate_tokens(iter(source.splitlines(keepends=True)).__next__):
         if token.type == COMMENT:
@@ -175,17 +228,24 @@ def _scan_directives(
                 comment_text,
                 token.line[: token.start[1]].strip() != "",
             )
-            directive = _match_directive(comment_text)
-            if directive is not None:
-                matches.append((token.start[0], directive))
+            ignore_directive = _match_ignore_directive(comment_text)
+            if ignore_directive is not None:
+                ignore_matches.append((token.start[0], ignore_directive))
+            elif BOUNDARY_DIRECTIVE_RE.match(comment_text):
+                boundary_lines.append(token.start[0])
         elif token.type not in NON_CODE_TOKEN_TYPES:
             code_lines.add(token.start[0])
 
-    return comments, code_lines, tuple(matches)
+    return _DirectiveScan(
+        comments_by_line=comments,
+        code_lines=code_lines,
+        ignore_matches=tuple(ignore_matches),
+        boundary_lines=tuple(boundary_lines),
+    )
 
 
-def _match_directive(comment_text: str) -> str | None:
-    match = DIRECTIVE_RE.match(comment_text)
+def _match_ignore_directive(comment_text: str) -> str | None:
+    match = IGNORE_DIRECTIVE_RE.match(comment_text)
     return match.group("rule_ids") if match else None
 
 
@@ -200,7 +260,7 @@ def _validated_rule_ids(
             rule_id.strip()
             for rule_id in raw_rule_ids.split(",")
             if rule_id.strip()
-        )
+        ),
     )
     if not parsed_rule_ids:
         return (), (
@@ -247,7 +307,7 @@ def _rule_id_error(
 
 
 def _token_error_line(exc: TokenError) -> int:
-    if len(exc.args) >= 2 and isinstance(exc.args[1], tuple):
+    if len(exc.args) >= _TOKEN_ERROR_LOCATION_ARG and isinstance(exc.args[1], tuple):
         line_no = exc.args[1][0]
         if isinstance(line_no, int):
             return line_no

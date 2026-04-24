@@ -4,7 +4,7 @@ language: python
 severity: warning
 message: "Immediately-invoked lambda `(lambda: ...)()` - inline the expression"
 metadata:
-  weight: 3
+  weight: 5
   category: slop
 rule:
   kind: call
@@ -18,7 +18,7 @@ language: python
 severity: warning
 message: "`lambda x: f(x)` - pass `f` directly"
 metadata:
-  weight: 2
+  weight: 5
   category: slop
 rule:
   kind: lambda
@@ -29,7 +29,7 @@ language: python
 severity: warning
 message: "Empty `__init__` - delete it, Python provides a default constructor"
 metadata:
-  weight: 2
+  weight: 5
   category: slop
 rule:
   kind: function_definition
@@ -47,7 +47,7 @@ language: python
 severity: info
 message: "`return None` at end of function - drop it, `None` returns implicitly"
 metadata:
-  weight: 2
+  weight: 1
   category: slop
 rule:
   kind: return_statement
@@ -74,7 +74,7 @@ language: python
 severity: warning
 message: "`except ...: pass` after multi-step work hides real failures; catch specific errors or log"
 metadata:
-  weight: 4
+  weight: 5
   category: slop
 rule:
   any:
@@ -102,10 +102,10 @@ rule:
 ---
 id: tokenizer-char-append-branch
 language: python
-severity: warning
+severity: info
 message: "Per-char tokenizer branches with `append` + `pos += 1` - use `{char: TokenType}` lookup table"
 metadata:
-  weight: 4
+  weight: 1
   category: slop
 rule:
   kind: expression_statement
@@ -121,7 +121,7 @@ language: python
 severity: warning
 message: Catching an exception only to re-raise it adds noise; drop the try/except
 metadata:
-  weight: 3
+  weight: 5
   category: slop
 rule:
   kind: except_clause
@@ -134,7 +134,7 @@ language: python
 severity: warning
 message: except clause with bare pass silently swallows errors
 metadata:
-  weight: 4
+  weight: 5
   category: slop
 rule:
   kind: except_clause
@@ -148,7 +148,7 @@ language: python
 severity: warning
 message: IOError is an alias for OSError since Py3.3; drop the pair
 metadata:
-  weight: 2
+  weight: 5
   category: slop
 rule:
   kind: except_clause
@@ -159,7 +159,7 @@ language: python
 severity: info
 message: pragma no cover suppresses coverage on dead branches; remove the branch instead
 metadata:
-  weight: 3
+  weight: 1
   category: slop
 rule:
   kind: comment
@@ -167,10 +167,10 @@ rule:
 ---
 id: per-method-assert-not-none
 language: python
-severity: hint
+severity: info
 message: assert self.X is not None at method entry - enforce in __init__ once
 metadata:
-  weight: 2
+  weight: 1
   category: slop
 rule:
   kind: assert_statement
@@ -181,7 +181,7 @@ language: python
 severity: warning
 message: del on a named parameter inside a function silences unused-param lint - drop from signature
 metadata:
-  weight: 3
+  weight: 5
   category: slop
 rule:
   kind: delete_statement
@@ -197,10 +197,10 @@ rule:
 ---
 id: wrapper-isvalid-oneliner
 language: python
-severity: hint
+severity: info
 message: One-line is_valid_X wrapping a regex match/search/fullmatch adds no value
 metadata:
-  weight: 2
+  weight: 1
   category: slop
 rule:
   kind: function_definition
@@ -219,7 +219,7 @@ language: python
 severity: warning
 message: s.replace(p, '') if s.startswith(p) else s - use str.removeprefix
 metadata:
-  weight: 3
+  weight: 5
   category: slop
 rule:
   pattern: "$S.replace($P, $EMPTY) if $S.startswith($P) else $S"
@@ -229,7 +229,7 @@ language: python
 severity: info
 message: Decorative section banner comment - delete, let structure speak for itself
 metadata:
-  weight: 2
+  weight: 1
   category: slop
 rule:
   kind: comment
@@ -237,10 +237,10 @@ rule:
 ---
 id: dataclass-count-explosion
 language: python
-severity: hint
+severity: info
 message: "@dataclass decorator - 10+ in one file suggests TypedDict or consolidation target"
 metadata:
-  weight: 2
+  weight: 1
   category: slop
   min_file_count: 10
 rule:
@@ -249,10 +249,10 @@ rule:
 ---
 id: dataclass-few-attributes
 language: python
-severity: hint
+severity: info
 message: "@dataclass with <=2 scalar attributes - use a NamedTuple or tuple unless you need mutability"
 metadata:
-  weight: 2
+  weight: 1
   category: slop
 rule:
   kind: class_definition
@@ -277,10 +277,10 @@ rule:
 ---
 id: dataclass-tagged-union-discriminator
 language: python
-severity: hint
+severity: info
 message: "@dataclass with `kind: str` + multiple Optional fields - model as distinct types or a Literal discriminator"
 metadata:
-  weight: 3
+  weight: 1
   category: slop
 rule:
   any:
@@ -319,7 +319,7 @@ language: python
 severity: info
 message: "Empty Error/Exception/Warning subclass - use one base error and pass context in the message"
 metadata:
-  weight: 2
+  weight: 1
   category: slop
 rule:
   kind: class_definition
@@ -340,10 +340,10 @@ rule:
 ---
 id: identity-wrapper-function
 language: python
-severity: hint
+severity: info
 message: "`def f(x): return g(x)` - identity wrapper adds no value; call the inner function directly"
 metadata:
-  weight: 2
+  weight: 1
   category: slop
 rule:
   any:
@@ -366,10 +366,10 @@ rule:
 ---
 id: predicate-isinstance-wrapper
 language: python
-severity: hint
+severity: info
 message: "`def is_X(v) -> bool: return isinstance(v, T)` - inline the isinstance check; the wrapper adds no value"
 metadata:
-  weight: 2
+  weight: 1
   category: slop
 rule:
   any:
@@ -385,17 +385,17 @@ language: python
 severity: warning
 message: "`(_ for _ in ()).throw(...)` - raise inside a lambda via generator hack; use `def helper(): raise ...`"
 metadata:
-  weight: 4
+  weight: 5
   category: slop
 rule:
   pattern: "(_ for _ in ()).throw($_)"
 ---
 id: oswalk-relpath-sep-replace
 language: python
-severity: warning
+severity: info
 message: "`os.walk` + `os.path.relpath` + `.replace(os.sep, '/')` - use `Path(root).rglob('*')` and `.relative_to(root).as_posix()`"
 metadata:
-  weight: 3
+  weight: 1
   category: slop
 rule:
   kind: for_statement

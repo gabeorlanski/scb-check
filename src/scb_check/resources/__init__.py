@@ -1,3 +1,5 @@
+"""Load bundled and extra ast-grep rule resources."""
+
 from __future__ import annotations
 
 import os
@@ -21,7 +23,7 @@ def _rule_file_names() -> tuple[str, ...]:
             entry.name
             for entry in rules_dir.iterdir()
             if entry.name.endswith(".yaml")
-        )
+        ),
     )
 
 
@@ -62,6 +64,7 @@ def _extra_rules() -> tuple[Path, ...]:
 
 
 def rule_texts() -> Iterator[tuple[str, str]]:
+    """Yield bundled and environment-provided ast-grep rule text."""
     rules_dir = resources.files(_RULES_PACKAGE).joinpath(_RULES_DIR_NAME)
     for name in _rule_file_names():
         yield name, rules_dir.joinpath(name).read_text(encoding="utf-8")
@@ -71,6 +74,7 @@ def rule_texts() -> Iterator[tuple[str, str]]:
 
 
 def load_thresholds(rules_path: Path) -> dict[str, int]:
+    """Load per-rule minimum file-count thresholds from `rules_path`."""
     with rules_path.open("r", encoding="utf-8") as rules_file:
         documents = tuple(yaml.safe_load_all(rules_file))
 
@@ -90,6 +94,7 @@ def load_thresholds(rules_path: Path) -> dict[str, int]:
 
 @contextmanager
 def rules_file() -> Iterator[Path]:
+    """Write all active ast-grep rules to a temporary YAML file."""
     with NamedTemporaryFile(
         mode="w",
         suffix=".yaml",

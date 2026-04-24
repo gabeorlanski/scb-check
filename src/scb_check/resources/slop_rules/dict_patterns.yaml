@@ -1,10 +1,10 @@
 ---
 id: chained-dict-get
 language: python
-severity: warning
+severity: info
 message: "`.get().get()` chain - extract helper or use `operator.itemgetter` / try-except KeyError"
 metadata:
-  weight: 3
+  weight: 1
   category: slop
 rule:
   kind: call
@@ -22,7 +22,7 @@ language: python
 severity: info
 message: "Repeated `d[k] = f(...)` lines - use a loop or dict comprehension"
 metadata:
-  weight: 3
+  weight: 1
   category: slop
 rule:
   kind: expression_statement
@@ -40,7 +40,7 @@ language: python
 severity: info
 message: "`d.get(k, 0)` - use a defaultdict(int) instead or a try/except KeyError guard."
 metadata:
-  weight: 3
+  weight: 1
   category: slop
 rule:
   kind: call
@@ -58,10 +58,10 @@ rule:
 ---
 id: dict-get-empty-string-default
 language: python
-severity: warning
+severity: info
 message: "`x = d.get(k, ''); if x:` - conflates missing key with empty value; use `.get(k)` and `is not None`"
 metadata:
-  weight: 3
+  weight: 1
   category: slop
 rule:
   kind: expression_statement
@@ -77,7 +77,7 @@ language: python
 severity: info
 message: "`d.get(k, [])` - builds a fresh list each call; use `d.setdefault(k, [])` or `defaultdict(list)`"
 metadata:
-  weight: 3
+  weight: 1
   category: slop
 rule:
   kind: call
@@ -103,7 +103,7 @@ language: python
 severity: info
 message: "`d.get(k, {})` - builds a fresh dict each call; use `d.setdefault(k, {})` or `defaultdict(dict)`"
 metadata:
-  weight: 3
+  weight: 1
   category: slop
 rule:
   kind: call
@@ -126,7 +126,7 @@ language: python
 severity: warning
 message: "`d.get(k, None)` - drop the `None`, it is already the default"
 metadata:
-  weight: 2
+  weight: 5
   category: slop
 rule:
   kind: call
@@ -146,7 +146,7 @@ language: python
 severity: warning
 message: "`k in d.keys()` - use `k in d`"
 metadata:
-  weight: 3
+  weight: 5
   category: slop
 rule:
   kind: comparison_operator
@@ -162,7 +162,7 @@ language: python
 severity: warning
 message: "`list(d.keys())` - use `list(d)`"
 metadata:
-  weight: 3
+  weight: 5
   category: slop
 rule:
   kind: call
@@ -180,10 +180,10 @@ rule:
 ---
 id: manual-dict-setdefault
 language: python
-severity: warning
+severity: info
 message: "`if k not in d: d[k] = v` - use `d.setdefault(k, v)`"
 metadata:
-  weight: 2
+  weight: 1
   category: slop
 rule:
   any:
@@ -194,10 +194,10 @@ rule:
 ---
 id: verbose-dict-key-access
 language: python
-severity: warning
+severity: info
 message: "`if k in d: v = d[k]` - use `v = d.get(k)` (or `d.get(k, default)`)"
 metadata:
-  weight: 2
+  weight: 1
   category: slop
 rule:
   kind: if_statement
@@ -205,10 +205,10 @@ rule:
 ---
 id: verbose-dict-update
 language: python
-severity: warning
+severity: info
 message: "Single-statement `d[k] = v` loop - use `{k: v for ... in ...}` comprehension"
 metadata:
-  weight: 4
+  weight: 1
   category: slop
 rule:
   any:
@@ -230,7 +230,7 @@ language: python
 severity: info
 message: "`d[k] = v` in each if/elif branch - use a dispatch `{cond: (k, v)}` or helper"
 metadata:
-  weight: 4
+  weight: 1
   category: slop
 rule:
   pattern: "if $COND1:\n  $$$PRE1\n  $D[$KEY1] = $VAL1\n  $$$POST1\nelif $COND2:\n\
@@ -241,7 +241,7 @@ language: python
 severity: warning
 message: "`for k in d.keys()` - use `for k in d`"
 metadata:
-  weight: 4
+  weight: 5
   category: slop
 rule:
   kind: for_statement
@@ -252,7 +252,7 @@ language: python
 severity: warning
 message: "`for k, _ in d.items()` - use `for k in d`"
 metadata:
-  weight: 4
+  weight: 5
   category: slop
 rule:
   kind: for_statement
@@ -263,7 +263,7 @@ language: python
 severity: warning
 message: "`for _, v in d.items()` - use `for v in d.values()`"
 metadata:
-  weight: 4
+  weight: 5
   category: slop
 rule:
   kind: for_statement
@@ -274,17 +274,17 @@ language: python
 severity: warning
 message: "`if k in d: v = d[k] else: v = default` - use `v = d.get(k, default)`"
 metadata:
-  weight: 4
+  weight: 5
   category: slop
 rule:
   pattern: "if $KEY in $DICT:\n    $OUT = $DICT[$KEY]\nelse:\n    $OUT = $DEFAULT\n"
 ---
 id: manual-dict-counter-if-else
 language: python
-severity: warning
+severity: info
 message: "Manual dict counter - use `d[k] = d.get(k, 0) + 1` or `collections.Counter(iterable)`"
 metadata:
-  weight: 4
+  weight: 1
   category: slop
 rule:
   any:
@@ -296,7 +296,7 @@ language: python
 severity: warning
 message: "`sorted(d.keys())` - use `sorted(d)`"
 metadata:
-  weight: 4
+  weight: 5
   category: slop
 rule:
   pattern: sorted($DICT.keys())
@@ -306,7 +306,7 @@ language: python
 severity: warning
 message: "`{k: d[k] for k in sorted(d.keys())}` - use `dict(sorted(d.items()))`"
 metadata:
-  weight: 4
+  weight: 5
   category: slop
 rule:
   any:
@@ -318,7 +318,7 @@ language: python
 severity: info
 message: "`dict.fromkeys(keys, val)` - use `{k: val for k in keys}` (and never with a mutable `val`, it is shared)"
 metadata:
-  weight: 2
+  weight: 1
   category: slop
 rule:
   kind: call
@@ -329,7 +329,7 @@ language: python
 severity: warning
 message: "`d.get(k, default)` inside `try/except KeyError` - the default is unreachable; drop it or drop the except"
 metadata:
-  weight: 4
+  weight: 5
   category: slop
 rule:
   kind: call
@@ -344,10 +344,10 @@ rule:
 ---
 id: deep-dict-access
 language: python
-severity: warning
+severity: info
 message: "4+ levels of `d[a][b][c][d]` - use a dataclass or `operator.itemgetter`"
 metadata:
-  weight: 3
+  weight: 1
   category: slop
 rule:
   kind: subscript
@@ -363,7 +363,7 @@ language: python
 severity: info
 message: "`v = d.get(k); if v is None:` - use `if k in d:` or try/except KeyError"
 metadata:
-  weight: 2
+  weight: 1
   category: slop
 rule:
   kind: if_statement
@@ -379,7 +379,7 @@ rule:
 ---
 id: init-populate-iterate-dict
 language: python
-severity: hint
+severity: info
 message: "Create-populate-iterate `$DICT` - use `{k: v for ...}` or skip the intermediate dict"
 note: 'Consider refactoring to:
 
@@ -391,7 +391,7 @@ note: 'Consider refactoring to:
 
   '
 metadata:
-  weight: 4
+  weight: 1
   category: slop
 rule:
   pattern: "for $VARS in $DICT.$METHOD():\n    $$$BODY\n"
@@ -436,7 +436,7 @@ language: python
 severity: warning
 message: "sorted(..., key=lambda i: i[0]) / `(i[0], i[1])` - default sort already matches; drop the key"
 metadata:
-  weight: 3
+  weight: 5
   category: slop
 rule:
   any:
@@ -449,7 +449,7 @@ language: python
 severity: warning
 message: "{k: v for k, v in d.items()} is just dict(d)"
 metadata:
-  weight: 3
+  weight: 5
   category: slop
 rule:
   pattern: "{$K: $V for $K, $V in $D.items()}"
@@ -459,7 +459,7 @@ language: python
 severity: warning
 message: "`for k, v in pairs: d[k] = v` - use `d = dict(pairs)` (or `d.update(pairs)` if merging)"
 metadata:
-  weight: 3
+  weight: 5
   category: slop
 rule:
   pattern: |
@@ -471,7 +471,7 @@ language: python
 severity: info
 message: "`if x is not None: updates[k] = x` for each arg - drop the optional defaulting or pass `**kwargs` through"
 metadata:
-  weight: 3
+  weight: 1
   category: slop
 rule:
   kind: if_statement

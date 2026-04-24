@@ -4,7 +4,7 @@ language: python
 severity: warning
 message: "`a < b and b < c` - use chained form `a < b < c`"
 metadata:
-  weight: 3
+  weight: 5
   category: slop
 rule:
   kind: boolean_operator
@@ -23,7 +23,7 @@ language: python
 severity: warning
 message: "`x == True` / `x == False` - use `if x:` / `if not x:`"
 metadata:
-  weight: 2
+  weight: 5
   category: slop
 rule:
   kind: comparison_operator
@@ -34,7 +34,7 @@ language: python
 severity: info
 message: "`x is not None and y is not None` - use `all(v is not None for v in (x, y))` or try/except"
 metadata:
-  weight: 2
+  weight: 1
   category: slop
 rule:
   kind: boolean_operator
@@ -42,34 +42,21 @@ rule:
 ---
 id: empty-string-or
 language: python
-severity: warning
+severity: info
 message: "`x == '' or ...` - use `not x` to catch empty string via truthiness"
 metadata:
-  weight: 2
+  weight: 1
   category: slop
 rule:
   kind: boolean_operator
   regex: ==\s*(""|'')\s+(or|and)
----
-id: explicit-bool-cast
-language: python
-severity: info
-message: "`bool(x)` - drop it, use truthiness directly in `if`/`and`/`or`"
-metadata:
-  weight: 2
-  category: slop
-rule:
-  kind: call
-  has:
-    kind: identifier
-    regex: ^bool$
 ---
 id: pointless-bool-cast
 language: python
 severity: warning
 message: "`if bool(x):` - drop `bool()`, `if` already tests truthiness"
 metadata:
-  weight: 3
+  weight: 5
   category: slop
 rule:
   kind: if_statement
@@ -80,7 +67,7 @@ language: python
 severity: warning
 message: "`bool(x)` inside `if`/`and`/`or` - drop it, these already test truthiness"
 metadata:
-  weight: 3
+  weight: 5
   category: slop
 rule:
   kind: if_statement
@@ -95,7 +82,7 @@ language: python
 severity: warning
 message: "`True if x else False` - use `bool(x)` (or just `x` if already boolean)"
 metadata:
-  weight: 2
+  weight: 5
   category: slop
 rule:
   kind: conditional_expression
@@ -106,7 +93,7 @@ language: python
 severity: info
 message: "`x is not None and x != ''` - use `if x:` (empty string is also falsy)"
 metadata:
-  weight: 2
+  weight: 1
   category: slop
 rule:
   kind: boolean_operator
@@ -117,7 +104,7 @@ language: python
 severity: warning
 message: "`len(x) == 0` - use `if not x:` (or `if x:` for `> 0`)"
 metadata:
-  weight: 3
+  weight: 5
   category: slop
 rule:
   kind: comparison_operator
@@ -136,7 +123,7 @@ language: python
 severity: warning
 message: "`len(x) > 0` / `len(x) != 0` - use `if x:`"
 metadata:
-  weight: 2
+  weight: 5
   category: slop
 rule:
   kind: comparison_operator
@@ -150,7 +137,7 @@ language: python
 severity: warning
 message: "`type(x) == T` - use `isinstance(x, T)` (handles subclasses)"
 metadata:
-  weight: 2
+  weight: 5
   category: slop
 rule:
   kind: comparison_operator
@@ -163,7 +150,7 @@ language: python
 severity: warning
 message: "`isinstance(x, A) or isinstance(x, B)` - use `isinstance(x, (A, B))`"
 metadata:
-  weight: 2
+  weight: 5
   category: slop
 rule:
   kind: boolean_operator
@@ -174,7 +161,7 @@ language: python
 severity: info
 message: "`isinstance(x, bool)` - `bool` is an `int` subclass; reconsider whether you want type-specific handling"
 metadata:
-  weight: 2
+  weight: 1
   category: slop
 rule:
   kind: call
@@ -185,7 +172,7 @@ language: python
 severity: warning
 message: is True / is False identity check - use truthiness
 metadata:
-  weight: 2
+  weight: 5
   category: slop
 rule:
   kind: comparison_operator
@@ -200,7 +187,7 @@ language: python
 severity: info
 message: isinstance bool guard combined with numeric isinstance - wrap in helper rather than inlining
 metadata:
-  weight: 3
+  weight: 1
   category: slop
 rule:
   kind: boolean_operator
@@ -208,10 +195,10 @@ rule:
 ---
 id: mutual-isinstance-or-and
 language: python
-severity: warning
+severity: info
 message: "`isinstance(a, T) or isinstance(b, T): return isinstance(a, T) and isinstance(b, T) and ...` - lift `type(a) is type(b) is T` or an early-return guard"
 metadata:
-  weight: 3
+  weight: 1
   category: slop
 rule:
   kind: if_statement

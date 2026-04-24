@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from scb_check.analysis.loc import sloc_line_numbers
 
+if TYPE_CHECKING:
+    import pytest
 
-def test_01() -> None:
+
+def test_sloc_skips_blank_and_comments() -> None:
+    """Blank lines and comments are excluded from SLOC."""
     source = """
 # one
 alpha = 1
@@ -15,7 +21,8 @@ beta = 2  # inline comments still count
     assert sloc_line_numbers(source) == frozenset({2, 5})
 
 
-def test_02() -> None:
+def test_sloc_skips_docstrings() -> None:
+    """Module and function docstrings are excluded from SLOC."""
     source = '''
 """module docstring"""
 
@@ -27,7 +34,8 @@ def marker():
     assert sloc_line_numbers(source) == frozenset({3, 5})
 
 
-def test_03() -> None:
+def test_sloc_skips_standalone_strings() -> None:
+    """Standalone string statements follow radon's non-SLOC behavior."""
     source = '''
 def marker():
     value = 1
@@ -38,7 +46,8 @@ def marker():
     assert sloc_line_numbers(source) == frozenset({1, 2, 4})
 
 
-def test_04() -> None:
+def test_sloc_skips_multiline_docstrings() -> None:
+    """Multiline docstring bodies are excluded from SLOC."""
     source = '''
 def marker():
     """
@@ -52,7 +61,8 @@ def marker():
     assert sloc_line_numbers(source) == frozenset({1, 7})
 
 
-def test_05() -> None:
+def test_sloc_counts_f_strings() -> None:
+    """F-string expression statements are counted as SLOC."""
     source = """
 def marker():
     f"not a docstring"
@@ -62,9 +72,10 @@ def marker():
     assert sloc_line_numbers(source) == frozenset({1, 2, 3})
 
 
-def test_06(
-    recwarn,
-) -> None:  # type: ignore[no-untyped-def]
+def test_sloc_hides_escape_warnings(
+    recwarn: pytest.WarningsRecorder,
+) -> None:
+    """Invalid escape sequences do not leak SyntaxWarning records."""
     source = """
 def marker():
     pattern = "\\_"

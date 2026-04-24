@@ -1,3 +1,5 @@
+"""Count source lines of code for Python files."""
+
 from __future__ import annotations
 
 from token import COMMENT
@@ -30,6 +32,7 @@ def sloc_line_numbers(
     source: str,
     tree: Tree | None = None,
 ) -> frozenset[int]:
+    """Return 1-indexed source lines that contain executable code."""
     source_lines = source.splitlines(keepends=True)
     text_lines = source.splitlines()
     lines: set[int] = set()
@@ -67,7 +70,7 @@ def _string_ranges(root: Node, source_lines: list[str]) -> tuple[tuple[int, int]
                 (
                     literal.start_point[0] + 1,
                     literal.end_point[0] + 1,
-                )
+                ),
             )
 
         stack.extend(reversed(node.named_children))

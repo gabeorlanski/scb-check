@@ -1,3 +1,5 @@
+"""Run ast-grep rules and convert matches to findings."""
+
 from __future__ import annotations
 
 import json
@@ -20,7 +22,6 @@ def run_sg(files: tuple[Path, ...], rules_path: Path) -> tuple[AstGrepHit, ...]:
     hard failure, so scb-check still produces clone and erosion numbers.
     Line and column numbers in the returned hits are 1-indexed.
     """
-
     if not files or not rules_path.exists():
         logger.warning(
             "no files to scan or rules file missing",
@@ -82,7 +83,7 @@ def run_sg(files: tuple[Path, ...], rules_path: Path) -> tuple[AstGrepHit, ...]:
                     rule_id=str(payload["ruleId"]),
                     matched_text=str(payload["text"]),
                     message=str(payload["message"]),
-                )
+                ),
             )
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
             logger.warning("failed to parse ast-grep output", error=str(exc))
@@ -93,6 +94,6 @@ def run_sg(files: tuple[Path, ...], rules_path: Path) -> tuple[AstGrepHit, ...]:
             hit.line,
             hit.col,
             hit.rule_id,
-        )
+        ),
     )
     return tuple(hits)

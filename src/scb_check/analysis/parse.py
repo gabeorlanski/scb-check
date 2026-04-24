@@ -1,3 +1,5 @@
+"""Parse Python source with a shared tree-sitter parser."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -13,7 +15,7 @@ logger = get_logger(__name__)
 
 
 class ParseError(ValueError):  # scbc ignore[empty-exception-subclass]
-    pass
+    """Raised when Python source cannot be read or parsed."""
 
 
 _PARSER: Parser | None = None
@@ -26,7 +28,6 @@ def parse_file(file_path: Path) -> tuple[str, Tree]:
     be read or if tree-sitter reports a syntax error — callers
     (the pipeline) catch this and skip the file with a warning.
     """
-
     try:
         source = file_path.read_text(encoding="utf-8")
     except UnicodeDecodeError:
@@ -47,6 +48,7 @@ def parse_file(file_path: Path) -> tuple[str, Tree]:
 
 
 def parse_source(source: str) -> Tree:
+    """Parse Python `source` and raise `ParseError` on syntax errors."""
     parser = _get_parser()
     tree = parser.parse(source.encode("utf-8"))
     if tree.root_node.has_error:
@@ -55,7 +57,7 @@ def parse_source(source: str) -> Tree:
 
 
 def _get_parser() -> Parser:
-    global _PARSER
+    global _PARSER  # noqa: PLW0603
     if _PARSER is None:
         language = Language(tree_sitter_python.language())
         _PARSER = Parser(language)

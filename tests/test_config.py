@@ -8,7 +8,8 @@ from scb_check.config import ConfigError
 from scb_check.config import load_config
 
 
-def test_01(tmp_path: Path) -> None:
+def test_prefers_scb_toml(tmp_path: Path) -> None:
+    """scb-check.toml takes precedence over pyproject configuration."""
     root = tmp_path / "repo"
     nested = root / "pkg" / "app"
     nested.mkdir(parents=True)
@@ -28,7 +29,8 @@ def test_01(tmp_path: Path) -> None:
     assert config.base_dir == root
 
 
-def test_02(tmp_path: Path) -> None:
+def test_reads_pyproject_section(tmp_path: Path) -> None:
+    """Pyproject tool.scb-check settings are discovered from repo roots."""
     root = tmp_path / "repo"
     nested = root / "a" / "b"
     nested.mkdir(parents=True)
@@ -44,9 +46,10 @@ def test_02(tmp_path: Path) -> None:
     assert config.base_dir == root
 
 
-def test_03(
+def test_imports_tool_excludes(
     tmp_path: Path,
 ) -> None:
+    """Ruff and ty excludes are imported when no scb-check section exists."""
     root = tmp_path / "repo"
     nested = root / "a" / "b"
     nested.mkdir(parents=True)
@@ -59,7 +62,7 @@ def test_03(
                 "",
                 "[tool.ty.src]",
                 'exclude = ["tests/fixtures/"]',
-            ]
+            ],
         )
         + "\n",
         encoding="utf-8",
@@ -72,9 +75,10 @@ def test_03(
     assert config.context_lines == 1
 
 
-def test_04(
+def test_merges_tool_excludes(
     tmp_path: Path,
 ) -> None:
+    """scb-check, Ruff, and ty exclude patterns are merged."""
     root = tmp_path / "repo"
     nested = root / "pkg"
     nested.mkdir(parents=True)
@@ -92,7 +96,7 @@ def test_04(
                 "",
                 "[tool.ty.src]",
                 'exclude = ["tests/fixtures/"]',
-            ]
+            ],
         )
         + "\n",
         encoding="utf-8",
@@ -108,9 +112,10 @@ def test_04(
     assert "tests/fixtures/**" in config.exclude
 
 
-def test_05(
+def test_ignores_bad_tool_excludes_with_scb(
     tmp_path: Path,
 ) -> None:
+    """Invalid external tool exclude shapes do not override scb-check settings."""
     root = tmp_path / "repo"
     nested = root / "pkg"
     nested.mkdir(parents=True)
@@ -128,7 +133,7 @@ def test_05(
                 "",
                 "[tool.ty]",
                 'src = "not-a-table"',
-            ]
+            ],
         )
         + "\n",
         encoding="utf-8",
@@ -140,9 +145,10 @@ def test_05(
     assert config.exclude == ("custom/**",)
 
 
-def test_06(
+def test_ignores_bad_tool_excludes_explicit(
     tmp_path: Path,
 ) -> None:
+    """Explicit pyproject configs ignore invalid external tool exclude shapes."""
     config_file = tmp_path / "pyproject.toml"
     config_file.write_text(
         "\n".join(
@@ -152,7 +158,7 @@ def test_06(
                 "",
                 "[tool.ty]",
                 'src = "not-a-table"',
-            ]
+            ],
         )
         + "\n",
         encoding="utf-8",
@@ -165,7 +171,8 @@ def test_06(
     assert config.base_dir == tmp_path
 
 
-def test_07(tmp_path: Path) -> None:
+def test_rejects_unknown_explicit_keys(tmp_path: Path) -> None:
+    """Unknown keys in an explicit config raise ConfigError."""
     config_file = tmp_path / "scb-check.toml"
     config_file.write_text("exclude = []\nextra = true\n", encoding="utf-8")
 
@@ -173,9 +180,10 @@ def test_07(tmp_path: Path) -> None:
         load_config(config_file, tmp_path)
 
 
-def test_08(
+def test_rejects_unknown_discovered_keys(
     tmp_path: Path,
 ) -> None:
+    """Unknown discovered scb-check keys raise ConfigError."""
     root = tmp_path / "repo"
     nested = root / "pkg"
     nested.mkdir(parents=True)
@@ -185,7 +193,7 @@ def test_08(
             [
                 "[tool.scb-check]",
                 "extra = true",
-            ]
+            ],
         )
         + "\n",
         encoding="utf-8",
@@ -195,7 +203,8 @@ def test_08(
         load_config(None, nested)
 
 
-def test_09(tmp_path: Path) -> None:
+def test_rejects_non_list_exclude(tmp_path: Path) -> None:
+    """Non-list exclude values raise ConfigError."""
     config_file = tmp_path / "scb-check.toml"
     config_file.write_text('exclude = "tests/**"\n', encoding="utf-8")
 
@@ -203,7 +212,8 @@ def test_09(tmp_path: Path) -> None:
         load_config(config_file, tmp_path)
 
 
-def test_10(tmp_path: Path) -> None:
+def test_rejects_missing_config(tmp_path: Path) -> None:
+    """Missing explicit config paths raise ConfigError."""
     config_file = tmp_path / "missing.toml"
 
     with pytest.raises(ConfigError, match="config path does not exist"):

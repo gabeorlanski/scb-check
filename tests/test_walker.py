@@ -5,13 +5,13 @@ from pathlib import Path
 import pytest
 
 from scb_check.config import Config
-from scb_check.walker import PathError
-from scb_check.walker import discover_python_files
+from scb_check.walker import walk_python_files
 
 
-def test_01(
+def test_walk_skips_default_dirs(
     tmp_path: Path,
 ) -> None:
+    """Discovery skips default ignored directories."""
     root = tmp_path / "repo"
     (root / "pkg").mkdir(parents=True)
     (root / "node_modules").mkdir()
@@ -22,16 +22,17 @@ def test_01(
     (root / "__pycache__" / "skip2.py").write_text("q = 4\n", encoding="utf-8")
 
     config = Config(exclude=(), base_dir=root)
-    files = discover_python_files(root, config)
+    files = tuple(sorted(walk_python_files(root, config)))
 
     assert files == tuple(
         sorted(
-            [(root / "good.py").resolve(), (root / "pkg" / "keep.py").resolve()]
-        )
+            [(root / "good.py").resolve(), (root / "pkg" / "keep.py").resolve()],
+        ),
     )
 
 
-def test_02(tmp_path: Path) -> None:
+def test_walk_applies_excludes(tmp_path: Path) -> None:
+    """Discovery applies configured exclude patterns."""
     root = tmp_path / "repo"
     generated = root / "generated"
     pkg = root / "pkg"
@@ -41,34 +42,38 @@ def test_02(tmp_path: Path) -> None:
     (pkg / "keep.py").write_text("y = 1\n", encoding="utf-8")
 
     config = Config(exclude=("generated/**",), base_dir=root)
-    files = discover_python_files(root, config)
+    files = tuple(walk_python_files(root, config))
 
     assert files == ((pkg / "keep.py").resolve(),)
 
 
-def test_03(tmp_path: Path) -> None:
-    with pytest.raises(PathError, match="path does not exist"):
-        discover_python_files(
-            tmp_path / "missing",
-            Config(exclude=(), base_dir=tmp_path),
+def test_walk_missing_path_errors(tmp_path: Path) -> None:
+    """Missing discovery paths raise FileNotFoundError."""
+    with pytest.raises(FileNotFoundError, match="path does not exist"):
+        tuple(
+            walk_python_files(
+                tmp_path / "missing",
+                Config(exclude=(), base_dir=tmp_path),
+            ),
         )
 
 
-def test_04(
+def test_walk_non_python_file_errors(
     tmp_path: Path,
 ) -> None:
+    """Non-Python file paths raise ValueError."""
     source = tmp_path / "notes.txt"
     source.write_text("hello\n", encoding="utf-8")
 
-    with pytest.raises(PathError, match="not a Python file"):
-        discover_python_files(source, Config(exclude=(), base_dir=tmp_path))
+    with pytest.raises(ValueError, match="not a Python file"):
+        tuple(walk_python_files(source, Config(exclude=(), base_dir=tmp_path)))
 
 
-def test_05(
+def test_walk_allows_empty_dir(
     tmp_path: Path,
 ) -> None:
+    """Empty directories produce no files."""
     root = tmp_path / "empty"
     root.mkdir()
 
-    with pytest.raises(PathError, match="no Python files found"):
-        discover_python_files(root, Config(exclude=(), base_dir=tmp_path))
+    assert tuple(walk_python_files(root, Config(exclude=(), base_dir=tmp_path))) == ()

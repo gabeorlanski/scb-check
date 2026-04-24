@@ -10,14 +10,15 @@ from conftest import FIXTURES
 from scb_check.analysis.astgrep import run_sg
 
 
-def test_01(
+def test_missing_sg_returns_no_hits(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    """Missing sg binary produces no ast-grep hits."""
     rules_file = tmp_path / "rules.yaml"
     rules_file.write_text("---\nid: x\nrule:\n  pattern: x\n", encoding="utf-8")
     monkeypatch.setattr(
-        "scb_check.analysis.astgrep.shutil.which", lambda _: None
+        "scb_check.analysis.astgrep.shutil.which", lambda _: None,
     )
 
     hits = run_sg((FIXTURES / "corpus" / "module_c.py",), rules_file)
@@ -25,7 +26,8 @@ def test_01(
     assert hits == ()
 
 
-def test_02() -> None:
+def test_sg_finds_bundled_rule() -> None:
+    """Installed sg reports hits from bundled rules."""
     if shutil.which("sg") is None:
         pytest.skip("sg binary not available")
 
@@ -43,10 +45,11 @@ def test_02() -> None:
     assert any(hit.rule_id == "chained-dict-get" for hit in hits)
 
 
-def test_03(
+def test_sg_skips_bad_json(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    """Malformed ast-grep JSON records are ignored."""
     rules_file = tmp_path / "rules.yaml"
     rules_file.write_text("---\nid: x\nrule:\n  pattern: x\n", encoding="utf-8")
 
@@ -60,11 +63,11 @@ def test_03(
     )
 
     monkeypatch.setattr(
-        "scb_check.analysis.astgrep.shutil.which", lambda _: "sg"
+        "scb_check.analysis.astgrep.shutil.which", lambda _: "sg",
     )
 
     def fake_run(
-        *args: object, **kwargs: object
+        *_args: object, **_kwargs: object,
     ) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(
             args=["sg"],

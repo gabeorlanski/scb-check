@@ -1,3 +1,5 @@
+"""Configure structured logging for `scb-check`."""
+
 from __future__ import annotations
 
 import logging
@@ -17,12 +19,13 @@ def _log_level(verbosity: int) -> int:
     }
     return (
         logging.DEBUG
-        if verbosity >= 2
+        if verbosity >= 2  # noqa: PLR2004
         else levels.get(verbosity, logging.WARNING)
     )
 
 
 def configure_logging(verbosity: int) -> None:
+    """Configure `structlog` and stdlib logging for CLI verbosity."""
     level = _log_level(verbosity)
     logging.basicConfig(
         format="%(message)s",
@@ -43,4 +46,5 @@ def configure_logging(verbosity: int) -> None:
 
 
 def get_logger(name: str) -> FilteringBoundLogger:
+    """Return a typed `structlog` logger for `name`."""
     return cast("FilteringBoundLogger", structlog.get_logger(name))

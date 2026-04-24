@@ -4,7 +4,7 @@ language: python
 severity: info
 message: "`<Container>[..., Any, ...]` - specify concrete element types or use a `TypedDict`/`@dataclass`/`Protocol`"
 metadata:
-  weight: 2
+  weight: 1
   category: slop
 rule:
   any:
@@ -33,7 +33,7 @@ language: python
 severity: warning
 message: "`Union[..., Any]` / `... | Any` - drop `Any`, it subsumes every other member"
 metadata:
-  weight: 2
+  weight: 5
   category: slop
 rule:
   any:
@@ -62,7 +62,7 @@ language: python
 severity: warning
 message: "`Optional[Any]` / `Any | None` - reduces to `Any`; drop the wrapper"
 metadata:
-  weight: 3
+  weight: 5
   category: slop
 rule:
   any:
@@ -81,7 +81,7 @@ language: python
 severity: info
 message: "`Callable[..., Any]` - specify the return type; `...` already erases the parameter signature"
 metadata:
-  weight: 2
+  weight: 1
   category: slop
 rule:
   any:
@@ -97,7 +97,7 @@ language: python
 severity: info
 message: "`object` annotation - use a concrete type, `Protocol`, or `Any`"
 metadata:
-  weight: 2
+  weight: 1
   category: slop
 rule:
   kind: type
@@ -112,7 +112,7 @@ language: python
 severity: warning
 message: "Deprecated `typing` import - use built-ins (list/dict/tuple/set/type), `collections.*`, or `X | Y` / `X | None` (PEP 585/604)"
 metadata:
-  weight: 2
+  weight: 5
   category: slop
 rule:
   kind: import_from_statement

@@ -1,14 +1,15 @@
+"""Compute summary scores from analysis flags."""
+
 from __future__ import annotations
 
-import math
 from pathlib import Path
 
 from scb_check.models import Flags
-from scb_check.models import FunctionSymbol
 from scb_check.models import Report
 
 
 def compute_report(flags: Flags) -> Report:
+    """Compute verbosity and erosion summary metrics from `flags`."""
     total_loc = sum(loc for _, loc in flags.total_loc_by_file)
     clone_lines_by_file = {
         entry.file: entry.lines for entry in flags.clone_sloc_lines_by_file
@@ -31,13 +32,20 @@ def compute_report(flags: Flags) -> Report:
         clone_loc = 0
         ast_loc = 0
 
-    total_mass = sum(_mass(symbol) for symbol in flags.all_functions)
-    high_cc_mass = sum(_mass(symbol) for symbol in flags.high_cc_functions)
+    total_mass = sum(symbol.cc_mass() for symbol in flags.all_functions)
+    high_cc_mass = sum(symbol.cc_mass() for symbol in flags.high_cc_functions)
     erosion = (high_cc_mass / total_mass) if total_mass else 0.0
+
+    total_cog_mass = sum(symbol.cog_mass() for symbol in flags.all_functions)
+    high_cog_mass = sum(
+        symbol.cog_mass() for symbol in flags.high_cog_functions
+    )
+    cog_erosion = (high_cog_mass / total_cog_mass) if total_cog_mass else 0.0
 
     return Report(
         verbosity=verbosity,
         erosion=erosion,
+        cog_erosion=cog_erosion,
         files_scanned=len(flags.total_loc_by_file),
         total_loc=total_loc,
         verbosity_flagged_loc=verbosity_flagged_loc,
@@ -45,8 +53,11 @@ def compute_report(flags: Flags) -> Report:
         ast_grep_flagged_loc=ast_loc,
         total_functions=len(flags.all_functions),
         high_cc_functions=len(flags.high_cc_functions),
+        high_cog_functions=len(flags.high_cog_functions),
         total_mass=total_mass,
         high_cc_mass=high_cc_mass,
+        total_cog_mass=total_cog_mass,
+        high_cog_mass=high_cog_mass,
     )
 
 
@@ -61,9 +72,3 @@ def _count_union_lines(
         ast_lines = ast_lines_by_file.get(path, frozenset())
         total += len(clone_lines | ast_lines)
     return total
-
-
-def _mass(symbol: FunctionSymbol) -> float:
-    if symbol.sloc <= 0:
-        return 0.0
-    return symbol.complexity * math.sqrt(symbol.sloc)

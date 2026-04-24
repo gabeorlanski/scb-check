@@ -16,6 +16,7 @@ dependencies = [
     "tree-sitter>=0.25.0",
     "tree-sitter-python>=0.25.0",
     "pyyaml>=6.0.2",
+    "pydantic>=2.13.3",
 ]
 
 [project.scripts]
@@ -60,40 +61,32 @@ force-single-line = true
 single-line-exclusions = ["typing"]
 
 [tool.ruff.lint]
-select = [
-    "I",
-    "F",
-    "W",        # PyCodeStyle warnings
-    "E",        # PyCodeStyle errors
-    "UP",       # Warn if certain things can changed due to newer Python versions
-    "C4",       # Catch incorrect use of comprehensions, dict, list, etc
-    "FA",       # Enforce from __future__ import annotations
-    "ISC",      # Good use of string concatenation
-    "ICN",      # Use common import conventions
-    "RET",      # Good return practices
-    "SIM",      # Common simplification rules
-    "TID",      # Some good import practices
-    "TC",       # Enforce importing certain types in a TYPE_CHECKING block
-    "PTH",      # Use pathlib instead of os.path
-    "TD",       # Be diligent with TODO comments
-    "NPY",      # Some numpy-specific things
-    "A",   # detect shadowed builtins
-    "BLE", # disallow catch-all exceptions
-    "S",   # disallow things like "exec"
-    "FBT", # detect boolean traps
-    "N",   # enforce naming conventions, e.g. ClassName vs function_name
-]
+select = ["ALL"]
 ignore = [
     "TC001",
     "TC003",
     "E501",
     "C408",
+    "EM101",
+    "EM102",
+    "TRY003",
+    "COM812"
 ]
 
 [tool.ruff.lint.per-file-ignores]
 "**/__init__.py" = ["E402"]
-"!src/**.py" = ["D"]
-"tests/**.py" = ["S101"]
+"tests/**.py" = [
+    "S101",
+    "D100",
+    "INP001",
+    "PLR2004",
+    "ARG005",
+    "FLY002",
+]
+
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"  # Options: "google", "numpy", or "pep257"
 
 [tool.vulture]
 paths = ["src/scb_check"]

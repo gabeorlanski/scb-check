@@ -1,3 +1,5 @@
+"""Analyze Python codebases for verbosity and erosion."""
+
 from __future__ import annotations
 
 __all__ = ["__version__"]

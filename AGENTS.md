@@ -21,7 +21,6 @@ uv run ruff check --fix .
 uv run ty check .
 uv run pytest
 uv run scb-check check .            # ty/ruff like reporting
-uv run scb-check rule <rule id>     # shows the information for a specific rule
 uv run vulture
 ```
 
@@ -41,3 +40,21 @@ The package splits into three layers. Before editing in one, read its `AGENTS.md
 - Top level (boundaries): [`cli.py`](src/scb_check/cli.py), [`pipeline.py`](src/scb_check/pipeline.py), [`config.py`](src/scb_check/config.py), [`walker.py`](src/scb_check/walker.py), [`logging.py`](src/scb_check/logging.py); shared dataclasses in [`models.py`](src/scb_check/models.py).
 
 Tests mirror this layout: [`tests/analysis/`](tests/analysis/), [`tests/reporting/`](tests/reporting/), and boundary tests at `tests/` root.
+
+# Philosophy
+
+Pydantic AI is meant to be a light-weight library that any Python developer who wants to work with LLMs and agents (whether simple or complex) should feel no hesitation to pull into their project. It's not meant to be everything to everyone, but it should enable people to build just about anything.
+
+As such, we prefer strong primitives, powerful abstractions, and general solutions and extension points that enable people to build things that we hadn't even thought of, over narrow solutions for specific use cases, opinionated solutions that push a particular approach to agent design that hasn't yet stood the test of time, or generally "every single possible battery included" solutions that make the library unnecessarily bloated.
+
+# Coding Guidelines
+
+When generating or reviewing code anywhere in this repo, always read [agent_docs/index.md](agent_docs/index.md) and follow/enforce those guidelines. Don't forget to read the linked "topic guides" when appropriate.
+
+Additionally, always read the directory-specific instructions when working in those directories:
+
+- [docs/AGENTS.md](docs/AGENTS.md)
+- [pydantic_ai_slim/pydantic_ai/AGENTS.md](pydantic_ai_slim/pydantic_ai/AGENTS.md)
+- [pydantic_ai_slim/pydantic_ai/builtin_tools/AGENTS.md](pydantic_ai_slim/pydantic_ai/builtin_tools/AGENTS.md)
+- [pydantic_ai_slim/pydantic_ai/models/AGENTS.md](pydantic_ai_slim/pydantic_ai/models/AGENTS.md)
+- [tests/AGENTS.md](tests/AGENTS.md)

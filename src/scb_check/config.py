@@ -1,3 +1,5 @@
+"""Load and validate `scb-check` configuration."""
+
 from __future__ import annotations
 
 import tomllib
@@ -8,16 +10,19 @@ from typing import Any
 
 @dataclass(frozen=True, slots=True)
 class Config:
+    """Runtime configuration loaded from TOML or defaults."""
+
     exclude: tuple[str, ...]
     base_dir: Path
     context_lines: int = 1
 
 
 class ConfigError(ValueError):  # scbc ignore[empty-exception-subclass]
-    pass
+    """Raised when configuration discovery or validation fails."""
 
 
 def load_config(override_path: Path | None, cwd: Path) -> Config:
+    """Load configuration from `override_path`, discovery, or defaults."""
     if override_path is not None:
         if not override_path.exists():
             raise ConfigError(f"config path does not exist: {override_path}")
@@ -57,6 +62,7 @@ def _has_config(path: Path) -> bool:
 
 
 def _parse_config_file(path: Path) -> Config:
+    # scbc boundary: normalize user config from TOML.
     payload = _load_toml(path)
 
     if path.name != "pyproject.toml":
@@ -79,7 +85,7 @@ def _parse_config_file(path: Path) -> Config:
             exclude, context_lines = _scb_table(path, raw_scb_check)
 
         exclude = tuple(
-            dict.fromkeys((*exclude, *_tool_excludes(tool)))
+            dict.fromkeys((*exclude, *_tool_excludes(tool))),
         )
 
     return Config(
@@ -90,6 +96,7 @@ def _parse_config_file(path: Path) -> Config:
 
 
 def _tool_excludes(tool: dict[str, Any]) -> tuple[str, ...]:
+    # scbc boundary: imports exclusion config from other tools.
     patterns: list[str] = []
 
     raw_ruff = tool.get("ruff")
@@ -106,10 +113,19 @@ def _tool_excludes(tool: dict[str, Any]) -> tuple[str, ...]:
     return _norm_patterns(tuple(patterns))
 
 
-def _strings(value: Any) -> tuple[str, ...]:
-    return tuple(value) if isinstance(value, list) and all(
-        isinstance(entry, str) for entry in value
-    ) else ()
+def _strings(
+    value: object,  # scbc ignore[object-type-annotation]
+) -> tuple[str, ...]:
+
+    if not isinstance(value, list):
+        return tuple()
+
+    patterns: list[str] = []
+    for entry in value:
+        if not isinstance(entry, str):
+            return tuple()
+        patterns.append(entry)
+    return tuple(patterns)
 
 
 def _norm_patterns(patterns: tuple[str, ...]) -> tuple[str, ...]:
@@ -117,15 +133,16 @@ def _norm_patterns(patterns: tuple[str, ...]) -> tuple[str, ...]:
 
     for raw_pattern in patterns:
         normalized = raw_pattern.strip().replace("\\", "/")
-        if normalized.startswith("./"):
-            normalized = normalized[2:]
+        normalized = normalized.removeprefix("./")
         normalized = normalized.lstrip("/")
         if not normalized:
             continue
 
         if normalized.endswith("/"):
             normalized_patterns.append(f"{normalized.rstrip('/')}/**")
-        elif _is_glob(normalized) or normalized.endswith(".py"):
+        elif any(char in normalized for char in "*?[]") or normalized.endswith(
+            ".py"
+        ):
             normalized_patterns.append(normalized)
         else:
             normalized_patterns.extend((normalized, f"{normalized}/**"))
@@ -133,13 +150,11 @@ def _norm_patterns(patterns: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(normalized_patterns))
 
 
-def _is_glob(pattern: str) -> bool:
-    return any(char in pattern for char in "*?[]")
-
-
 def _scb_table(
-    path: Path, table: dict[str, Any]
+    path: Path,
+    table: dict[str, Any],
 ) -> tuple[tuple[str, ...], int]:
+    # scbc boundary: validates scb-check TOML fields.
     unknown = set(table) - {"exclude", "context"}
     if unknown:
         raise ConfigError(f"{path}: unknown key: {min(unknown)}")
@@ -160,6 +175,7 @@ def _scb_table(
 
 
 def _load_toml(path: Path) -> dict[str, Any]:
+    # scbc boundary: validates file IO and TOML syntax.
     try:
         raw = path.read_text(encoding="utf-8")
     except OSError as exc:

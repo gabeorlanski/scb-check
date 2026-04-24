@@ -2,26 +2,32 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING, Never
 
 import yaml
 from typer.testing import CliRunner
 
 from scb_check.cli import main
+from scb_check.config import Config
 from scb_check.models import AstGrepHit
 from scb_check.models import Flags
 from scb_check.pipeline import AnalysisResult
 from scb_check.pipeline import IgnoreDirectiveError
 
+if TYPE_CHECKING:
+    import pytest
 
-def test_01(
-    monkeypatch,
+
+def test_check_report_json(
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-) -> None:  # type: ignore[no-untyped-def]
+) -> None:
+    """The check --report option emits a JSON summary."""
     corpus = Path(__file__).parent / "fixtures" / "corpus"
     config_override = tmp_path / "scb-check.toml"
     config_override.write_text("", encoding="utf-8")
     monkeypatch.setattr(
-        "scb_check.pipeline.run_sg", lambda files, rules_path: ()
+        "scb_check.pipeline.run_sg", lambda _files, _rules_path: (),
     )
 
     runner = CliRunner()
@@ -41,6 +47,7 @@ def test_01(
     assert payload.keys() == {
         "verbosity",
         "erosion",
+        "cog_erosion",
         "files_scanned",
         "total_loc",
         "verbosity_flagged_loc",
@@ -48,20 +55,27 @@ def test_01(
         "ast_grep_flagged_loc",
         "total_functions",
         "high_cc_functions",
+        "high_cog_functions",
         "total_mass",
         "high_cc_mass",
+        "total_cog_mass",
+        "high_cog_mass",
     }
 
 
-def test_02(
-    monkeypatch,
+def test_check_human_findings(
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-) -> None:  # type: ignore[no-untyped-def]
+) -> None:
+    """The default check command emits human-readable findings."""
     corpus = Path(__file__).parent / "fixtures" / "corpus"
     config_override = tmp_path / "scb-check.toml"
     config_override.write_text("", encoding="utf-8")
 
-    def fake_ast_grep(files, rules_path):  # type: ignore[no-untyped-def]
+    def fake_ast_grep(
+        files: tuple[Path, ...],
+        _rules_path: Path,
+    ) -> tuple[AstGrepHit, ...]:
         target = next(file for file in files if file.name == "module_c.py")
         return (
             AstGrepHit(
@@ -90,9 +104,14 @@ def test_02(
         "erosion: function `complex_route` exceeds complexity threshold"
         in result.stdout
     )
+    assert (
+        "cog_erosion: function `complex_route` exceeds cognitive complexity threshold"
+        in result.stdout
+    )
 
 
-def test_03() -> None:
+def test_check_missing_path() -> None:
+    """Missing input paths are rejected with a usage error."""
     runner = CliRunner()
     result = runner.invoke(
         main,
@@ -103,17 +122,19 @@ def test_03() -> None:
     assert "path does not exist" in result.output
 
 
-def test_04(tmp_path: Path) -> None:
+def test_check_non_python_file(tmp_path: Path) -> None:
+    """Non-Python file inputs are rejected."""
     source = tmp_path / "notes.txt"
     source.write_text("hello\n", encoding="utf-8")
     runner = CliRunner()
     result = runner.invoke(main, ["check", str(source)])
 
     assert result.exit_code == 2
-    assert f"not a Python file: {source}" in result.output
+    assert "not a Python file" in result.output
 
 
-def test_05(tmp_path: Path) -> None:
+def test_check_missing_config(tmp_path: Path) -> None:
+    """Missing explicit config paths are rejected."""
     source = tmp_path / "sample.py"
     source.write_text("x = 1\n", encoding="utf-8")
     config_path = tmp_path / "missing.toml"
@@ -128,20 +149,22 @@ def test_05(tmp_path: Path) -> None:
     assert f"config path does not exist: {config_path}" in result.output
 
 
-def test_06(
-    monkeypatch, tmp_path: Path
-) -> None:  # type: ignore[no-untyped-def]
+def test_check_report_skips_bad_files(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Report mode skips files that fail parsing and counts valid files."""
     source_dir = tmp_path / "project"
     source_dir.mkdir()
     (source_dir / "ok.py").write_text(
-        "def run():\n    return 1\n", encoding="utf-8"
+        "def run():\n    return 1\n", encoding="utf-8",
     )
     (source_dir / "broken.py").write_text(
-        "def bad(:\n    return 0\n", encoding="utf-8"
+        "def bad(:\n    return 0\n", encoding="utf-8",
     )
 
     monkeypatch.setattr(
-        "scb_check.pipeline.run_sg", lambda files, rules_path: ()
+        "scb_check.pipeline.run_sg", lambda _files, _rules_path: (),
     )
 
     runner = CliRunner()
@@ -155,7 +178,8 @@ def test_06(
     assert payload["files_scanned"] == 1
 
 
-def test_07(tmp_path: Path) -> None:
+def test_check_empty_directory(tmp_path: Path) -> None:
+    """Directories without Python files are rejected."""
     source_dir = tmp_path / "empty"
     source_dir.mkdir()
     runner = CliRunner()
@@ -165,7 +189,8 @@ def test_07(tmp_path: Path) -> None:
     assert "no Python files found" in result.output
 
 
-def test_08() -> None:
+def test_rule_shows_yaml() -> None:
+    """Known rule IDs print their bundled rule YAML."""
     runner = CliRunner()
 
     result = runner.invoke(main, ["rule", "chained-dict-get"])
@@ -175,7 +200,8 @@ def test_08() -> None:
     assert payload["id"] == "chained-dict-get"
 
 
-def test_09() -> None:
+def test_rule_unknown_id() -> None:
+    """Unknown rule IDs are rejected."""
     runner = CliRunner()
 
     result = runner.invoke(main, ["rule", "does-not-exist"])
@@ -184,9 +210,11 @@ def test_09() -> None:
     assert "rule not found: does-not-exist" in result.output
 
 
-def test_10(
-    monkeypatch, tmp_path: Path
-) -> None:  # type: ignore[no-untyped-def]
+def test_check_passes_context(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Config context is passed to rendering."""
     source_dir = tmp_path / "project"
     source_dir.mkdir()
     source_file = source_dir / "ok.py"
@@ -195,9 +223,16 @@ def test_10(
     config_file = tmp_path / "scb-check.toml"
     config_file.write_text("context = 3\n", encoding="utf-8")
 
-    def fake_analyze(files):  # type: ignore[no-untyped-def]
+    def fake_analyze(
+        path: Path,
+        config: Config,
+        *,
+        include_all: bool = False,
+    ) -> AnalysisResult:
+        del config
         resolved = source_file.resolve()
-        assert files == (resolved,)
+        assert path == source_dir
+        assert include_all is False
         return AnalysisResult(
             flags=Flags.from_parts(total_loc_by_file=[(resolved, 1)]),
             source_lines_by_file={resolved: ("x = 1",)},
@@ -205,12 +240,14 @@ def test_10(
 
     captured: dict[str, int] = {}
 
-    def fake_render(  # type: ignore[no-untyped-def]
-        flags, source_lines_by_file, context_lines, verbosity
-    ):
+    def fake_render(
+        flags: Flags,
+        source_lines_by_file: dict[Path, tuple[str, ...]],
+        *,
+        context_lines: int,
+    ) -> str:
         del flags, source_lines_by_file
         captured["context_lines"] = context_lines
-        captured["verbosity"] = verbosity
         return ""
 
     monkeypatch.setattr("scb_check.commands.check.analyze", fake_analyze)
@@ -224,12 +261,13 @@ def test_10(
 
     assert result.exit_code == 0
     assert captured["context_lines"] == 3
-    assert captured["verbosity"] == 2
 
 
-def test_11(
-    monkeypatch, tmp_path: Path
-) -> None:  # type: ignore[no-untyped-def]
+def test_check_verbosity_sets_logging(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The --verbosity option sets logging verbosity."""
     source_dir = tmp_path / "project"
     source_dir.mkdir()
     source_file = source_dir / "ok.py"
@@ -238,9 +276,16 @@ def test_11(
     config_file = tmp_path / "scb-check.toml"
     config_file.write_text("context = 1\n", encoding="utf-8")
 
-    def fake_analyze(files):  # type: ignore[no-untyped-def]
+    def fake_analyze(
+        path: Path,
+        config: Config,
+        *,
+        include_all: bool = False,
+    ) -> AnalysisResult:
+        del config
         resolved = source_file.resolve()
-        assert files == (resolved,)
+        assert path == source_dir
+        assert include_all is False
         return AnalysisResult(
             flags=Flags.from_parts(total_loc_by_file=[(resolved, 1)]),
             source_lines_by_file={resolved: ("x = 1",)},
@@ -248,14 +293,23 @@ def test_11(
 
     captured: dict[str, int] = {}
 
-    def fake_render(  # type: ignore[no-untyped-def]
-        flags, source_lines_by_file, context_lines, verbosity
-    ):
-        del flags, source_lines_by_file, context_lines
+    def fake_configure_logging(verbosity: int) -> None:
         captured["verbosity"] = verbosity
+
+    def fake_render(
+        flags: Flags,
+        source_lines_by_file: dict[Path, tuple[str, ...]],
+        *,
+        context_lines: int,
+    ) -> str:
+        del flags, source_lines_by_file, context_lines
         return ""
 
     monkeypatch.setattr("scb_check.commands.check.analyze", fake_analyze)
+    monkeypatch.setattr(
+        "scb_check.commands.check.configure_logging",
+        fake_configure_logging,
+    )
     monkeypatch.setattr("scb_check.commands.check.render_flags", fake_render)
 
     runner = CliRunner()
@@ -274,16 +328,56 @@ def test_11(
     assert captured["verbosity"] == 1
 
 
-def test_12(
-    monkeypatch, tmp_path: Path
-) -> None:  # type: ignore[no-untyped-def]
+def test_check_include_all(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The --include-all flag is passed to analysis."""
+    source_dir = tmp_path / "project"
+    source_dir.mkdir()
+    source_file = source_dir / "ok.py"
+    source_file.write_text("x = 1\n", encoding="utf-8")
+
+    def fake_analyze(
+        path: Path,
+        config: Config,
+        *,
+        include_all: bool = False,
+    ) -> AnalysisResult:
+        del config
+        resolved = source_file.resolve()
+        assert path == source_dir
+        assert include_all is True
+        return AnalysisResult(
+            flags=Flags.from_parts(total_loc_by_file=[(resolved, 1)]),
+            source_lines_by_file={resolved: ("x = 1",)},
+        )
+
+    monkeypatch.setattr("scb_check.commands.check.analyze", fake_analyze)
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["check", "--include-all", str(source_dir)])
+
+    assert result.exit_code == 0
+
+
+def test_check_reports_ignore_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Ignore directive errors are reported as usage failures."""
     source = tmp_path / "sample.py"
     source.write_text("x = 1\n", encoding="utf-8")
 
-    def fake_analyze(files):  # type: ignore[no-untyped-def]
-        del files
+    def fake_analyze(
+        path: Path,
+        config: Config,
+        *,
+        include_all: bool = False,
+    ) -> Never:
+        del path, config, include_all
         raise IgnoreDirectiveError(
-            "sample.py:12: scbc ignore requires at least one rule id"
+            "sample.py:12: scbc ignore requires at least one rule id",
         )
 
     monkeypatch.setattr("scb_check.commands.check.analyze", fake_analyze)

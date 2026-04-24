@@ -5,11 +5,12 @@ from pathlib import Path
 from scb_check.models import AstGrepHit
 from scb_check.models import CloneBlock
 from scb_check.models import Flags
-from scb_check.models import FunctionSymbol
+from scb_check.models import ParsedSymbol
 from scb_check.reporting.render import render_flags
 
 
-def test_01(tmp_path: Path) -> None:
+def test_renders_all_finding_types(tmp_path: Path) -> None:
+    """Rendered output includes clone, ast-grep, and erosion findings."""
     file_path = tmp_path / "sample.py"
     file_path.write_text(
         "\n".join(
@@ -19,7 +20,7 @@ def test_01(tmp_path: Path) -> None:
                 "        return args",
                 "    return {}",
                 'value = cfg.get("a", {}).get("b", {}).get("c")',
-            ]
+            ],
         )
         + "\n",
         encoding="utf-8",
@@ -55,25 +56,29 @@ def test_01(tmp_path: Path) -> None:
             "`operator.itemgetter` / try-except KeyError"
         ),
     )
-    high_cc = FunctionSymbol(
+    high_cc = ParsedSymbol(
         file=file_path,
         name="resolve_config",
-        start_line=1,
-        end_line=4,
-        complexity=18,
+        start=(1, 0),
+        end=(4, 13),
+        node_type="function_definition",
+        statements=2,
+        cyc_complexity=18,
+        cog_complexity=18,
         sloc=32,
     )
     flags = Flags.from_parts(
         clones=[clone_a, clone_b],
         ast_grep_hits=[ast_hit],
         high_cc_functions=[high_cc],
+        high_cog_functions=[high_cc],
         total_loc_by_file=[(file_path, 5)],
         all_functions=[high_cc],
         clone_sloc_lines_by_file=[(file_path, {2, 3, 4})],
         ast_sloc_lines_by_file=[(file_path, {5})],
     )
     source_lines = {
-        file_path: tuple(file_path.read_text(encoding="utf-8").splitlines())
+        file_path: tuple(file_path.read_text(encoding="utf-8").splitlines()),
     }
 
     output = render_flags(flags, source_lines)
@@ -87,14 +92,24 @@ def test_01(tmp_path: Path) -> None:
         "erosion: function `resolve_config` exceeds complexity threshold"
         in output
     )
+    assert (
+        "cog_erosion: function `resolve_config` exceeds cognitive complexity threshold"
+        in output
+    )
     assert "2 │     if args:" in output
     assert '5 │ value = cfg.get("a", {}).get("b", {}).get("c")' in output
     assert "complexity: 18, sloc: 32 (threshold: complexity > 10)" in output
+    assert (
+        "cognitive complexity: 18, sloc: 32 "
+        "(threshold: cognitive complexity > 10)"
+        in output
+    )
 
 
-def test_02(
+def test_renders_overlapping_ast_hits(
     tmp_path: Path,
 ) -> None:
+    """Overlapping ast-grep hits render as separate findings."""
     file_path = tmp_path / "sample.py"
     file_path.write_text(
         "\n".join(
@@ -102,7 +117,7 @@ def test_02(
                 "def get_cfg_value(cfg):",
                 '    value = cfg.get("a", {}).get("b", {}).get("c")',
                 "    return value",
-            ]
+            ],
         )
         + "\n",
         encoding="utf-8",
@@ -139,7 +154,7 @@ def test_02(
         ast_sloc_lines_by_file=[(file_path, {2})],
     )
     source_lines = {
-        file_path: tuple(file_path.read_text(encoding="utf-8").splitlines())
+        file_path: tuple(file_path.read_text(encoding="utf-8").splitlines()),
     }
 
     output = render_flags(flags, source_lines, context_lines=1)
@@ -153,7 +168,8 @@ def test_02(
     assert "^" not in output
 
 
-def test_03(tmp_path: Path) -> None:
+def test_uses_ast_context(tmp_path: Path) -> None:
+    """Ast-grep rendering includes configured surrounding source lines."""
     file_path = tmp_path / "sample.py"
     file_path.write_text(
         "\n".join(
@@ -161,7 +177,7 @@ def test_03(tmp_path: Path) -> None:
                 "def get_cfg_value(cfg):",
                 '    value = cfg.get("a", {}).get("b", {}).get("c")',
                 "    return value",
-            ]
+            ],
         )
         + "\n",
         encoding="utf-8",
@@ -182,71 +198,28 @@ def test_03(tmp_path: Path) -> None:
         ast_sloc_lines_by_file=[(file_path, {2})],
     )
     source_lines = {
-        file_path: tuple(file_path.read_text(encoding="utf-8").splitlines())
+        file_path: tuple(file_path.read_text(encoding="utf-8").splitlines()),
     }
 
     output_with_zero = render_flags(flags, source_lines, context_lines=0)
     output_with_three = render_flags(flags, source_lines, context_lines=3)
 
-    assert output_with_zero == output_with_three
     assert ":2:13" in output_with_zero
+    assert "1 │ def get_cfg_value(cfg):" not in output_with_zero
+    assert "3 │     return value" not in output_with_zero
+    assert "1 │ def get_cfg_value(cfg):" in output_with_three
     assert (
         '2 │     value = cfg.get("a", {}).get("b", {}).get("c")'
-        in output_with_zero
+        in output_with_three
     )
-    assert "^" not in output_with_zero
+    assert "3 │     return value" in output_with_three
+    assert "^" not in output_with_three
 
 
-def test_04(
+def test_renders_multiline_ast_hit(
     tmp_path: Path,
 ) -> None:
-    file_path = tmp_path / "sample.py"
-    file_path.write_text(
-        "\n".join(
-            [
-                "def get_cfg_value(cfg):",
-                '    value = cfg.get("a", {}).get("b", {}).get("c")',
-                "    return value",
-            ]
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    ast_hit = AstGrepHit(
-        file=file_path,
-        line=2,
-        end_line=2,
-        col=12,
-        end_col=50,
-        rule_id="chained-dict-get",
-        matched_text='cfg.get("a", {}).get("b", {}).get("c")',
-        message="`.get().get()` chain - extract helper",
-    )
-    flags = Flags.from_parts(
-        ast_grep_hits=[ast_hit],
-        total_loc_by_file=[(file_path, 3)],
-        ast_sloc_lines_by_file=[(file_path, {2})],
-    )
-    source_lines = {
-        file_path: tuple(file_path.read_text(encoding="utf-8").splitlines())
-    }
-
-    output_default = render_flags(flags, source_lines)
-    output_verbose = render_flags(flags, source_lines, verbosity=1)
-    output_debug = render_flags(flags, source_lines, verbosity=2)
-
-    assert output_default == output_verbose
-    assert output_default == output_debug
-    assert (
-        '2 │     value = cfg.get("a", {}).get("b", {}).get("c")'
-        in output_default
-    )
-    assert "^" not in output_default
-
-
-def test_05(
-    tmp_path: Path,
-) -> None:
+    """Multiline ast-grep hits include every matched source line."""
     file_path = tmp_path / "sample.py"
     file_path.write_text(
         "\n".join(
@@ -256,7 +229,7 @@ def test_05(
                 '        ["a", "b"]',
                 "    )",
                 "    return value",
-            ]
+            ],
         )
         + "\n",
         encoding="utf-8",
@@ -280,7 +253,7 @@ def test_05(
         ast_sloc_lines_by_file=[(file_path, {2, 3, 4})],
     )
     source_lines = {
-        file_path: tuple(file_path.read_text(encoding="utf-8").splitlines())
+        file_path: tuple(file_path.read_text(encoding="utf-8").splitlines()),
     }
 
     output = render_flags(flags, source_lines, context_lines=1)
@@ -293,9 +266,10 @@ def test_05(
     assert "^" not in output
 
 
-def test_06(
+def test_renders_full_clone_span(
     tmp_path: Path,
 ) -> None:
+    """Clone rendering includes the full duplicated source span."""
     file_path = tmp_path / "sample.py"
     file_path.write_text(
         "\n".join(
@@ -306,7 +280,7 @@ def test_06(
                 "    value += 3",
                 "    value += 4",
                 "    return value",
-            ]
+            ],
         )
         + "\n",
         encoding="utf-8",
@@ -326,7 +300,7 @@ def test_06(
         clone_sloc_lines_by_file=[(file_path, {2, 3, 4, 5, 6})],
     )
     source_lines = {
-        file_path: tuple(file_path.read_text(encoding="utf-8").splitlines())
+        file_path: tuple(file_path.read_text(encoding="utf-8").splitlines()),
     }
 
     output = render_flags(flags, source_lines)
@@ -335,9 +309,10 @@ def test_06(
     assert "6 │     return value" in output
 
 
-def test_07(
+def test_groups_clone_instances(
     tmp_path: Path,
 ) -> None:
+    """Clone groups render one summary with each instance location."""
     file_path = tmp_path / "sample.py"
     file_path.write_text(
         "\n".join(
@@ -351,7 +326,7 @@ def test_07(
                 "    if args:",
                 "        return args",
                 "    return {}",
-            ]
+            ],
         )
         + "\n",
         encoding="utf-8",
@@ -380,7 +355,7 @@ def test_07(
         clone_sloc_lines_by_file=[(file_path, {2, 3, 4, 7, 8, 9})],
     )
     source_lines = {
-        file_path: tuple(file_path.read_text(encoding="utf-8").splitlines())
+        file_path: tuple(file_path.read_text(encoding="utf-8").splitlines()),
     }
 
     output = render_flags(flags, source_lines)
@@ -394,7 +369,8 @@ def test_07(
     assert "7 │     if args:" in output
 
 
-def test_08() -> None:
+def test_empty_flags_render_empty() -> None:
+    """No findings render as an empty string."""
     flags = Flags()
 
     assert render_flags(flags, {}) == ""

@@ -4,7 +4,7 @@ language: python
 severity: warning
 message: "Comprehension result discarded - use a `for` loop for side effects"
 metadata:
-  weight: 3
+  weight: 5
   category: slop
 rule:
   kind: expression_statement
@@ -20,7 +20,7 @@ language: python
 severity: warning
 message: "`for i in range(len(x))` - use `enumerate(x)` or iterate `x` directly"
 metadata:
-  weight: 3
+  weight: 5
   category: slop
 rule:
   pattern: "for $I in range(len($SEQ)):\n  $$$\n"
@@ -30,7 +30,7 @@ language: python
 severity: warning
 message: "`for x in list(iterable)` - drop `list()`, `for` iterates directly"
 metadata:
-  weight: 3
+  weight: 5
   category: slop
 rule:
   kind: for_statement
@@ -42,10 +42,10 @@ rule:
 ---
 id: list-map-filter
 language: python
-severity: warning
+severity: info
 message: "`list(map(f, xs))` / `list(filter(p, xs))` - use a list comprehension"
 metadata:
-  weight: 3
+  weight: 1
   category: slop
 rule:
   kind: call
@@ -66,7 +66,7 @@ language: python
 severity: warning
 message: "`all/any/sum/set/dict([...])` - drop brackets for a generator expression"
 metadata:
-  weight: 3
+  weight: 5
   category: slop
 rule:
   kind: call
@@ -81,10 +81,10 @@ rule:
 ---
 id: membership-test-list-literal
 language: python
-severity: warning
+severity: info
 message: "`x in [a, b, c, d]` - use a set literal `{a, b, c, d}` for O(1) lookup"
 metadata:
-  weight: 3
+  weight: 1
   category: slop
 rule:
   kind: comparison_operator
@@ -95,7 +95,7 @@ language: python
 severity: warning
 message: "`list([a, b, c])` is redundant - just use `[a, b, c]`"
 metadata:
-  weight: 2
+  weight: 5
   category: slop
 rule:
   pattern: list([$$$ARGS])
@@ -105,7 +105,7 @@ language: python
 severity: warning
 message: "`set([a, b, c])` - use set literal `{a, b, c}`"
 metadata:
-  weight: 2
+  weight: 5
   category: slop
 rule:
   kind: call
@@ -123,7 +123,7 @@ language: python
 severity: warning
 message: "`lst = lst + [x]` - use `lst.append(x)` (avoids copying the whole list)"
 metadata:
-  weight: 4
+  weight: 5
   category: slop
 rule:
   pattern: $LIST = $LIST + [$ITEM]
@@ -133,7 +133,7 @@ language: python
 severity: warning
 message: "`for x in it: lst.append(x)` - use `lst.extend(it)`"
 metadata:
-  weight: 4
+  weight: 5
   category: slop
 rule:
   kind: for_statement
@@ -144,7 +144,7 @@ language: python
 severity: warning
 message: "`''.join([...])` materializes a list first - pass the iterable directly"
 metadata:
-  weight: 4
+  weight: 5
   category: slop
 rule:
   kind: call
@@ -162,7 +162,7 @@ language: python
 severity: warning
 message: "`''.join([x for ...])` - drop brackets for a generator expression"
 metadata:
-  weight: 4
+  weight: 5
   category: slop
 rule:
   kind: call
@@ -177,10 +177,10 @@ rule:
 ---
 id: manual-sum-loop
 language: python
-severity: warning
+severity: info
 message: "`total = 0; for x in it: total += expr` - use `sum(expr for x in it)`"
 metadata:
-  weight: 4
+  weight: 1
   category: slop
 rule:
   kind: for_statement
@@ -194,10 +194,10 @@ rule:
 ---
 id: manual-count-loop
 language: python
-severity: warning
+severity: info
 message: "`count = 0; for x in it: count += 1` - use `sum(1 for x in it if cond)`"
 metadata:
-  weight: 4
+  weight: 1
   category: slop
 rule:
   kind: for_statement
@@ -211,10 +211,10 @@ rule:
 ---
 id: set-add-loop
 language: python
-severity: warning
+severity: info
 message: "`for x in it: s.add(v)` - use set comprehension `{v for x in it}`"
 metadata:
-  weight: 4
+  weight: 1
   category: slop
 rule:
   kind: for_statement
@@ -225,7 +225,7 @@ language: python
 severity: warning
 message: "`sorted([x for ...])` - drop brackets for generator expression `sorted(x for ...)`"
 metadata:
-  weight: 4
+  weight: 5
   category: slop
 rule:
   any:
@@ -237,7 +237,7 @@ language: python
 severity: warning
 message: "`set(x for x in it)` - use set comprehension `{x for x in it}`"
 metadata:
-  weight: 3
+  weight: 5
   category: slop
 rule:
   any:
@@ -249,7 +249,7 @@ language: python
 severity: warning
 message: "`[x for x in iter]` - use `list(iter)`"
 metadata:
-  weight: 2
+  weight: 5
   category: slop
 rule:
   kind: list_comprehension
@@ -257,10 +257,10 @@ rule:
 ---
 id: consecutive-append-calls
 language: python
-severity: warning
+severity: info
 message: "Consecutive `.append()` calls - use `.extend([a, b, c])`"
 metadata:
-  weight: 4
+  weight: 1
   category: slop
 rule:
   kind: expression_statement
@@ -280,10 +280,10 @@ rule:
 ---
 id: verbose-list-append-loop
 language: python
-severity: warning
+severity: info
 message: "Single-statement append loop - use `[expr for ... in ...]` comprehension"
 metadata:
-  weight: 4
+  weight: 1
   category: slop
 rule:
   any:
@@ -302,7 +302,7 @@ rule:
 ---
 id: init-populate-iterate-list
 language: python
-severity: hint
+severity: info
 message: "Create-append-iterate `$LIST` - use `[expr for ...]` or skip the intermediate list"
 note: 'Consider refactoring to:
 
@@ -314,7 +314,7 @@ note: 'Consider refactoring to:
 
   '
 metadata:
-  weight: 4
+  weight: 1
   category: slop
 rule:
   kind: for_statement
@@ -386,10 +386,10 @@ rule:
 ---
 id: materialize-then-sort-return
 language: python
-severity: warning
+severity: info
 message: "`tmp = [...]; return sorted(tmp)` - use `return sorted(x for ... in ...)`"
 metadata:
-  weight: 4
+  weight: 1
   category: slop
 rule:
   kind: return_statement
@@ -405,10 +405,10 @@ rule:
 ---
 id: manual-find-return-none
 language: python
-severity: warning
+severity: info
 message: "`for x in it: if c: return r; return None` - use `next((r for x in it if c), None)`"
 metadata:
-  weight: 4
+  weight: 1
   category: slop
 rule:
   kind: for_statement
@@ -423,10 +423,10 @@ rule:
 ---
 id: verbose-missing-remove-loop
 language: python
-severity: warning
+severity: info
 message: "Copy-list-then-remove to find missing items - use `set(required) - set(target)`"
 metadata:
-  weight: 4
+  weight: 1
   category: slop
 rule:
   kind: for_statement
@@ -442,7 +442,7 @@ language: python
 severity: warning
 message: "`frozenset([...])` - pass the iterable directly, drop the list"
 metadata:
-  weight: 4
+  weight: 5
   category: slop
 rule:
   kind: call
@@ -462,7 +462,7 @@ language: python
 severity: warning
 message: "`range(0, n)` - use `range(n)`, `0` is the default start"
 metadata:
-  weight: 4
+  weight: 5
   category: slop
 rule:
   pattern: range(0, $END)
@@ -472,7 +472,7 @@ language: python
 severity: warning
 message: "`sorted(list(x))` - use `sorted(x)`, it already returns a new list"
 metadata:
-  weight: 4
+  weight: 5
   category: slop
 rule:
   pattern: sorted(list($X))
@@ -482,7 +482,7 @@ language: python
 severity: warning
 message: "`continue` at end of loop body - delete it, the loop iterates anyway"
 metadata:
-  weight: 2
+  weight: 5
   category: slop
 rule:
   kind: block
@@ -494,10 +494,10 @@ rule:
 ---
 id: long-tuple-unpacking
 language: python
-severity: warning
+severity: info
 message: "Unpacking 5+ values from a tuple - use a `NamedTuple` or `@dataclass`"
 metadata:
-  weight: 3
+  weight: 1
   category: slop
 rule:
   kind: assignment
@@ -512,7 +512,7 @@ language: python
 severity: warning
 message: "`a = pair[0]; b = pair[1]` - use tuple unpacking `a, b = pair`"
 metadata:
-  weight: 3
+  weight: 5
   category: slop
 rule:
   kind: expression_statement
@@ -528,10 +528,10 @@ rule:
 ---
 id: split-magic-index
 language: python
-severity: warning
+severity: info
 message: "`s.split()[N]` with magic index - unpack into named vars (`a, b, c = s.split()`)"
 metadata:
-  weight: 3
+  weight: 1
   category: slop
 rule:
   kind: subscript
@@ -547,10 +547,10 @@ rule:
 ---
 id: slice-assign-listcomp-self
 language: python
-severity: warning
+severity: info
 message: "`lst[:] = [.. for .. in lst]` mutates a list while reading it - prefer assigning a new list unless in-place mutation is required"
 metadata:
-  weight: 3
+  weight: 1
   category: slop
 rule:
   any:
@@ -559,10 +559,10 @@ rule:
 ---
 id: redundant-blank-check
 language: python
-severity: warning
+severity: info
 message: "`line.isspace() or not line` then `line.strip()` `if not text` - one `if not line.strip(): continue` is enough"
 metadata:
-  weight: 3
+  weight: 1
   category: slop
 rule:
   kind: if_statement
@@ -584,10 +584,10 @@ rule:
 ---
 id: manual-set-union-loop
 language: python
-severity: hint
+severity: info
 message: "`s = set(); for r in it: s.update(r.X())` - use `set().union(*(r.X() for r in it))` or a comprehension"
 metadata:
-  weight: 2
+  weight: 1
   category: slop
 rule:
   kind: expression_statement
@@ -606,7 +606,7 @@ language: python
 severity: warning
 message: "`while True: chunk = f.read(N); if not chunk: break; h.update(chunk)` - use `hashlib.file_digest(f, ALGO)`"
 metadata:
-  weight: 4
+  weight: 5
   category: slop
 rule:
   kind: while_statement

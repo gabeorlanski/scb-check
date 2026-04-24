@@ -1,14 +1,14 @@
 # `analysis/` — source → findings
 
-Parses Python source and extracts structural findings. Tree-sitter based, with stdlib-tokenizer modules for SLOC accounting ([`loc.py`](loc.py)) and ast-grep ignore directives ([`ignores.py`](ignores.py)). Consumed by [`../pipeline.py`](../pipeline.py).
+Parses Python source and extracts structural findings. Tree-sitter based, with stdlib-tokenizer modules for SLOC accounting ([`loc.py`](loc.py)) and ast-grep ignore directives ([`ignores.py`](ignores.py)). Function extraction uses a simple tree visitor in [`symbols.py`](symbols.py) to emit Pydantic [`ParsedSymbol`](../models.py) IR objects. Consumed by [`../pipeline.py`](../pipeline.py).
 
 ## Invariants
 
 - **Line numbers are 1-indexed at the module boundary.** Tree-sitter exposes 0-indexed `.start_point[0]` — always emit `+ 1` when producing a finding.
 - **[`loc.sloc_line_numbers`](loc.py) is the single source of truth for "real" code lines.** It excludes comments, blank lines, and docstrings. Both verbosity intersection and total-LOC derive from it. Do not introduce a second SLOC rule.
 - **Parser is a module-level singleton** in [`parse.py`](parse.py). Don't re-instantiate per file.
-- **Findings are frozen dataclasses** from [`../models.py`](../models.py). Emit tuples across the module boundary, never lists.
-- **Ignore directives are comment-token based.** [`ignores.py`](ignores.py) must inspect only `tokenize` comment tokens for `# scbc ignore[...]`; do not raw-search source text.
+- **Most findings are frozen dataclasses** from [`../models.py`](../models.py); parsed function symbols are frozen Pydantic models. Emit tuples across the module boundary, never lists.
+- **Source directives are comment-token based.** [`ignores.py`](ignores.py) must inspect only `tokenize` comment tokens for `# scbc ignore[...]` and `# scbc boundary`; do not raw-search source text.
 
 ## Scoring-sensitive surfaces
 
@@ -16,7 +16,7 @@ These drive the verbosity/erosion numbers — change with care:
 
 - `CLONE_NODE_TYPES` in [`clones.py`](clones.py) — which block types get hashed.
 - `_hash_ast_subtree` / `_normalize_ast` — identifier and literal normalization.
-- `COMPLEXITY_NODE_TYPES` in [`symbols.py`](symbols.py) — which nodes count toward cyclomatic complexity.
+- `CYC_COMPLEXITY_NODE_TYPES` and cognitive-complexity flow-break sets in [`symbols.py`](symbols.py) — which nodes count toward complexity.
 - SLOC exclusion rules in [`loc.py`](loc.py).
 
 ## ast-grep boundary

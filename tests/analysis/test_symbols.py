@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from pathlib import Path
 from textwrap import dedent
 
@@ -10,34 +11,41 @@ from scb_check.analysis.parse import parse_file
 from scb_check.analysis.symbols import extract_functions
 
 
-def test_01() -> None:
+def test_extracts_nested_functions() -> None:
+    """Function extraction includes nested definitions."""
     source_path = FIXTURES / "symbols_sample.py"
     source, tree = parse_file(source_path)
 
     symbols = extract_functions(
-        source_path, tree, sloc_line_numbers(source, tree)
+        source_path,
+        tree,
+        sloc_line_numbers(source, tree),
     )
     names = {symbol.name for symbol in symbols}
 
     assert names == {"format_name", "outer", "inner"}
 
 
-def test_02() -> None:
+def test_reports_complexity_and_sloc() -> None:
+    """Extracted functions include complexity and SLOC metrics."""
     source_path = FIXTURES / "corpus" / "module_b.py"
     source, tree = parse_file(source_path)
 
     symbols = extract_functions(
-        source_path, tree, sloc_line_numbers(source, tree)
+        source_path,
+        tree,
+        sloc_line_numbers(source, tree),
     )
     complex_symbol = next(
         symbol for symbol in symbols if symbol.name == "complex_route"
     )
 
-    assert complex_symbol.complexity > 10
+    assert complex_symbol.cyc_complexity > 10
     assert complex_symbol.sloc > 0
 
 
-def test_03(tmp_path: Path) -> None:
+def test_uses_supplied_sloc_lines(tmp_path: Path) -> None:
+    """Function SLOC is counted from the supplied SLOC line set."""
     source_path = tmp_path / "sample.py"
     source_path.write_text(
         dedent(
@@ -46,7 +54,7 @@ def test_03(tmp_path: Path) -> None:
                 value = 1
                 """not a real docstring, but radon treats it as non-sloc"""
                 return value
-            '''
+            ''',
         ).strip()
         + "\n",
         encoding="utf-8",
@@ -61,3 +69,89 @@ def test_03(tmp_path: Path) -> None:
 
     assert source
     assert symbols[0].sloc == 3
+
+
+def test_builds_symbol_ir(tmp_path: Path) -> None:
+    """Function extraction emits the ParsedSymbol IR fields."""
+    source_path = tmp_path / "sample.py"
+    source_path.write_text(
+        dedent(
+            """
+            import os
+            from package.tools import make as mk, Widget
+
+            def route(value: int, fallback=None) -> str:
+                if value and fallback:
+                    return mk(value)
+                return os.path.join(str(value), Widget())
+            """,
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    source, tree = parse_file(source_path)
+
+    symbol = extract_functions(
+        source_path, tree, sloc_line_numbers(source, tree)
+    )[0]
+
+    assert {
+        "name": symbol.name,
+        "file": symbol.file,
+        "start": symbol.start,
+        "end": symbol.end,
+        "node_type": symbol.node_type,
+        "statements": symbol.statements,
+        "sloc": symbol.sloc,
+        "cyc_complexity": symbol.cyc_complexity,
+        "cog_complexity": symbol.cog_complexity,
+        "agruments": symbol.agruments,
+        "arguments": symbol.arguments,
+        "returns": symbol.returns,
+        "calls": symbol.calls,
+    } == {
+        "name": "route",
+        "file": source_path,
+        "start": (4, 0),
+        "end": (7, 45),
+        "node_type": "function_definition",
+        "statements": 2,
+        "sloc": 4,
+        "cyc_complexity": 3,
+        "cog_complexity": 2,
+        "agruments": {"value": "int", "fallback": None},
+        "arguments": {"value": "int", "fallback": None},
+        "returns": "str",
+        "calls": Counter(
+            {
+                "package.tools.make": 1,
+                "os.path.join": 1,
+                "package.tools.Widget": 1,
+            },
+        ),
+    }
+
+
+def test_complexity_counts_nesting(tmp_path: Path) -> None:
+    """Cognitive complexity adds one point per nesting level."""
+    source_path = tmp_path / "sample.py"
+    source_path.write_text(
+        dedent(
+            """
+            def nested(items):
+                for item in items:
+                    if item:
+                        while item.ready:
+                            break
+            """,
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    source, tree = parse_file(source_path)
+
+    symbol = extract_functions(
+        source_path, tree, sloc_line_numbers(source, tree)
+    )[0]
+
+    assert symbol.cog_complexity == 7

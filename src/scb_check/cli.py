@@ -1,3 +1,5 @@
+"""Top-level Typer application wiring for `scb-check`."""
+
 from __future__ import annotations
 
 from importlib import metadata
@@ -24,12 +26,11 @@ def callback(
     ] = None,
 ) -> None:
     """scb-check CLI."""
-
     if not version:
         return
 
     typer.echo(metadata.version("scb-check"))
-    raise typer.Exit()
+    raise typer.Exit
 
 
 register_check(main)

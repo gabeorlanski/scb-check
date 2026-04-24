@@ -1,3 +1,5 @@
+"""Register and implement the `scb-check check` command."""
+
 from __future__ import annotations
 
 import json
@@ -15,11 +17,11 @@ from scb_check.pipeline import IgnoreDirectiveError
 from scb_check.pipeline import analyze
 from scb_check.reporting.render import render_flags
 from scb_check.reporting.score import compute_report
-from scb_check.walker import PathError
-from scb_check.walker import discover_python_files
 
 
 def register_check(app: typer.Typer) -> None:
+    """Register the `check` subcommand on `app`."""
+
     @app.command("check")
     def check(
         path: Annotated[Path, typer.Argument()],
@@ -41,14 +43,20 @@ def register_check(app: typer.Typer) -> None:
                 help="Increase logging detail. -v enables info logs, -vv enables debug logs.",
             ),
         ] = 0,
+        include_all: Annotated[
+            bool,
+            typer.Option(
+                "--include-all",
+                help="Include all ast-grep findings, including ignored and boundary-suppressed findings.",
+            ),
+        ] = False,
     ) -> None:
         configure_logging(verbosity)
 
         try:
             config = load_config(config_path, Path.cwd())
-            files = discover_python_files(path, config)
-            result = analyze(files)
-        except (ConfigError, IgnoreDirectiveError, PathError) as exc:
+            result = analyze(path, config, include_all=include_all)
+        except (ConfigError, IgnoreDirectiveError, OSError, ValueError) as exc:
             typer.echo(str(exc), err=True)
             raise typer.Exit(code=2) from exc
 
@@ -65,7 +73,6 @@ def register_check(app: typer.Typer) -> None:
             result.flags,
             result.source_lines_by_file,
             context_lines=config.context_lines,
-            verbosity=verbosity,
         )
         if output:
             typer.echo(output)

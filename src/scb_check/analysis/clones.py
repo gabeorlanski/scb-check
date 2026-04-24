@@ -1,3 +1,5 @@
+"""Detect duplicate Python syntax subtrees as clone findings."""
+
 from __future__ import annotations
 
 import hashlib
@@ -7,6 +9,7 @@ from operator import attrgetter
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from scb_check.analysis.loc import sloc_line_numbers
 from scb_check.models import CloneBlock
 
 if TYPE_CHECKING:
@@ -22,7 +25,7 @@ CLONE_NODE_TYPES = frozenset(
         "with_statement",
         "try_statement",
         "match_statement",
-    }
+    },
 )
 
 _LITERAL_TOKENS = {
@@ -53,6 +56,7 @@ def detect_clones(
     files: tuple[tuple[Path, str, Tree], ...],
     min_lines: int = 3,
 ) -> tuple[CloneBlock, ...]:
+    """Return clone blocks found in parsed Python `files`."""
     candidates = sorted(
         (
             candidate
@@ -69,10 +73,11 @@ def detect_clones(
 
     clones: list[CloneBlock] = []
     for hash_value, candidates_iter in groupby(
-        candidates, key=attrgetter("group_hash")
+        candidates,
+        key=attrgetter("group_hash"),
     ):
         candidates = tuple(candidates_iter)
-        if len(candidates) < 2:
+        if len(candidates) < 2:  # noqa: PLR2004
             continue
 
         sorted_candidates = sorted(
@@ -102,7 +107,7 @@ def detect_clones(
                     instance_count=len(sorted_candidates),
                     other_instances=other_instances,
                     first_lines=candidate.first_lines,
-                )
+                ),
             )
 
     return tuple(clones)
@@ -115,17 +120,20 @@ def _iter_clone_candidates(
     min_lines: int,
 ) -> tuple[_CloneCandidate, ...]:
     source_lines = source.splitlines()
+    sloc_lines = sloc_line_numbers(source, tree)
     candidates: list[_CloneCandidate] = []
     stack = [tree.root_node]
 
     while stack:
         node = stack.pop()
-        if node.type in CLONE_NODE_TYPES:
-            line_count = node.end_point[0] - node.start_point[0] + 1
+        if node.type in CLONE_NODE_TYPES and not _is_type_checking_block(node):
+            start_line = node.start_point[0] + 1
+            end_line = node.end_point[0] + 1
+            line_count = sum(
+                1 for line in sloc_lines if start_line <= line <= end_line
+            )
             if line_count >= min_lines:
                 hash_value = _hash_ast_subtree(node)
-                start_line = node.start_point[0] + 1
-                end_line = node.end_point[0] + 1
                 preview_end_line = min(end_line, start_line + 2)
                 candidates.append(
                     _CloneCandidate(
@@ -134,19 +142,53 @@ def _iter_clone_candidates(
                         end_line=end_line,
                         group_hash=hash_value,
                         first_lines=tuple(
-                            source_lines[start_line - 1 : preview_end_line]
+                            source_lines[start_line - 1 : preview_end_line],
                         ),
-                    )
+                    ),
                 )
         stack.extend(node.children)
 
     return tuple(candidates)
 
 
+def _is_type_checking_block(node: Node) -> bool:
+    condition = node.child_by_field_name("condition")
+    text = condition.text if condition is not None else None
+    return text in {b"TYPE_CHECKING", b"typing.TYPE_CHECKING"}
+
+
+def _is_plain_string_statement(node: Node) -> bool:
+    if node.type != "expression_statement":
+        return False
+    if len(node.named_children) != 1:
+        return False
+
+    expression = node.named_children[0]
+    if expression.type != "string":
+        return False
+
+    text = expression.text
+    if text is None:
+        return False
+
+    prefix = _string_prefix(text.decode("utf-8"))
+    return "b" not in prefix and "f" not in prefix
+
+
+def _string_prefix(literal: str) -> str:
+    prefix_chars: list[str] = []
+    for character in literal:
+        if character in {'"', "'"}:
+            break
+        prefix_chars.append(character.lower())
+    return "".join(prefix_chars)
+
+
 def _hash_ast_subtree(node: Node) -> str:
     normalized = _normalize_ast(node)
     return hashlib.md5(
-        normalized.encode("utf-8"), usedforsecurity=False
+        normalized.encode("utf-8"),
+        usedforsecurity=False,
     ).hexdigest()[:12]
 
 
@@ -170,7 +212,9 @@ def _normalize_ast(node: Node) -> str:
             return _LITERAL_TOKENS[current.type]
 
         children = tuple(
-            child for child in current.children if child.type != "comment"
+            child
+            for child in current.children
+            if child.type != "comment" and not _is_plain_string_statement(child)
         )
         if not children:
             return current.type

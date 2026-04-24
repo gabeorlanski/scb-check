@@ -6,7 +6,8 @@ from scb_check.models import FileLineSet
 from scb_check.models import Flags
 
 
-def test_01() -> None:
+def test_normalizes_file_line_sets() -> None:
+    """Flags.from_parts normalizes file line inputs to FileLineSet tuples."""
     path = Path("sample.py")
 
     flags = Flags.from_parts(
@@ -22,7 +23,8 @@ def test_01() -> None:
     )
 
 
-def test_02() -> None:
+def test_flags_default_empty_tuples() -> None:
+    """Flags defaults every collection field to an empty tuple."""
     flags = Flags()
 
     assert flags.clones == ()

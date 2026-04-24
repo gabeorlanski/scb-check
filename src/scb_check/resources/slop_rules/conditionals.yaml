@@ -4,7 +4,7 @@ language: python
 severity: warning
 message: "Same condition in `if` and `elif` - elif branch is unreachable, remove it"
 metadata:
-  weight: 3
+  weight: 5
   category: slop
 rule:
   kind: if_statement
@@ -15,7 +15,7 @@ language: python
 severity: info
 message: "`isinstance` ladder returning literals - use dispatch dict `{Type: value}[type(x)]` or polymorphism"
 metadata:
-  weight: 3
+  weight: 1
   category: slop
 rule:
   any:
@@ -34,7 +34,7 @@ language: python
 severity: warning
 message: "Manual min/max `if a > b: m = a else: m = b` - use `m = max(a, b)` / `min(a, b)`"
 metadata:
-  weight: 3
+  weight: 5
   category: slop
 rule:
   kind: if_statement
@@ -49,7 +49,7 @@ language: python
 severity: info
 message: "Nested `if` is the only statement in outer `if` body and neither has `else` - combine with `and` into a single condition"
 metadata:
-  weight: 3
+  weight: 1
   category: slop
 rule:
   kind: if_statement
@@ -90,7 +90,7 @@ language: python
 severity: info
 message: "Nested `if` early-exit guard with sibling code in outer `if` body - invert outer to early-exit (`if not outer: return/continue`) and flatten the nesting"
 metadata:
-  weight: 3
+  weight: 1
   category: slop
 rule:
   kind: if_statement
@@ -164,10 +164,10 @@ rule:
 ---
 id: repeated-if-continue
 language: python
-severity: warning
+severity: info
 message: "Multiple `if: continue` guards - combine with `or` or filter via comprehension"
 metadata:
-  weight: 3
+  weight: 1
   category: slop
 rule:
   kind: for_statement
@@ -191,7 +191,7 @@ language: python
 severity: info
 message: "Repeated `if: return error` checks - collect into one validator or raise"
 metadata:
-  weight: 3
+  weight: 1
   category: slop
 rule:
   kind: if_statement
@@ -213,7 +213,7 @@ language: python
 severity: info
 message: "Repeated `validate_*()` calls - loop over a list of validators"
 metadata:
-  weight: 3
+  weight: 1
   category: slop
 rule:
   kind: expression_statement
@@ -231,7 +231,7 @@ language: python
 severity: warning
 message: "`x if c else x` - both branches equal, drop the ternary"
 metadata:
-  weight: 3
+  weight: 5
   category: slop
 rule:
   kind: conditional_expression
@@ -239,10 +239,10 @@ rule:
 ---
 id: repeated-function-or-chain
 language: python
-severity: warning
+severity: info
 message: "`f(a) or f(b) or f(c) or f(d)` - use `any(f(x) for x in (a,b,c,d))`"
 metadata:
-  weight: 3
+  weight: 1
   category: slop
 rule:
   kind: boolean_operator
@@ -253,7 +253,7 @@ language: python
 severity: info
 message: "`if x == v1: return r1 elif x == v2: ...` - use `{v1: r1, v2: r2}.get(x, default)`"
 metadata:
-  weight: 3
+  weight: 1
   category: slop
 rule:
   kind: if_statement
@@ -268,7 +268,7 @@ language: python
 severity: info
 message: "`.append()` in each elif branch - compute value once then append, or dispatch"
 metadata:
-  weight: 3
+  weight: 1
   category: slop
 rule:
   pattern: "if $C1:\n  $L.append($A)\nelif $C2:\n  $L.append($B)\nelif $C3:\n  $L.append($C)\n"
@@ -278,7 +278,7 @@ language: python
 severity: warning
 message: "`if c: return True else: return False` - use `return c` (or `return not c`)"
 metadata:
-  weight: 3
+  weight: 5
   category: slop
 rule:
   kind: if_statement
@@ -291,7 +291,7 @@ language: python
 severity: info
 message: "Consecutive `if` on same variable - use `elif` (or return early after first branch)"
 metadata:
-  weight: 3
+  weight: 1
   category: slop
 rule:
   kind: if_statement
@@ -319,7 +319,7 @@ language: python
 severity: info
 message: "Nested `if x: if x.y: if x.y.z:` - use try/except AttributeError, or extract a small helper"
 metadata:
-  weight: 3
+  weight: 1
   category: slop
 rule:
   kind: if_statement
@@ -347,7 +347,7 @@ language: python
 severity: info
 message: "Repeated `if not isinstance(x, T): raise` - use type hints or a schema validator"
 metadata:
-  weight: 3
+  weight: 1
   category: slop
 rule:
   kind: if_statement
@@ -380,7 +380,7 @@ language: python
 severity: info
 message: "`v if x is None else o` - rewrite as `o if x is not None else v` for natural reading"
 metadata:
-  weight: 3
+  weight: 1
   category: slop
 rule:
   kind: conditional_expression
@@ -388,10 +388,10 @@ rule:
 ---
 id: fetchone-none-check
 language: python
-severity: hint
+severity: info
 message: "`row = cursor.fetchone(); if row is None:` - extract to `fetch_one_or_none()` helper"
 metadata:
-  weight: 3
+  weight: 1
   category: slop
 rule:
   kind: if_statement
@@ -411,10 +411,10 @@ rule:
 ---
 id: guard-return-none
 language: python
-severity: warning
+severity: info
 message: "`if x is None: return None` followed by another `return` - drop guard, `None` flows naturally"
 metadata:
-  weight: 2
+  weight: 1
   category: slop
 rule:
   kind: if_statement
@@ -427,7 +427,7 @@ language: python
 severity: info
 message: "`if x is None: raise` - let natural `AttributeError`/`TypeError` surface, or enforce via type hint"
 metadata:
-  weight: 2
+  weight: 1
   category: slop
 rule:
   pattern: |
@@ -443,7 +443,7 @@ language: python
 severity: warning
 message: "`if c: return True else: return False` - use `return bool(c)` or `return c`"
 metadata:
-  weight: 2
+  weight: 5
   category: slop
 rule:
   kind: if_statement
@@ -466,7 +466,7 @@ language: python
 severity: warning
 message: "`elif` after `return`/`raise` - use plain `if` (previous branch exits, no fallthrough)"
 metadata:
-  weight: 2
+  weight: 5
   category: slop
 rule:
   kind: if_statement
@@ -486,7 +486,7 @@ language: python
 severity: warning
 message: "`else` after `raise` - drop `else`, subsequent code runs only when no raise"
 metadata:
-  weight: 2
+  weight: 5
   category: slop
 rule:
   kind: if_statement
@@ -503,7 +503,7 @@ language: python
 severity: info
 message: "`if not x: return False` - combine with later condition or `return x and ...`"
 metadata:
-  weight: 2
+  weight: 1
   category: slop
 rule:
   kind: if_statement
@@ -521,10 +521,10 @@ rule:
 ---
 id: verbose-none-default
 language: python
-severity: warning
+severity: info
 message: "`if x is None: x = default` - use `x = x if x is not None else default`"
 metadata:
-  weight: 2
+  weight: 1
   category: slop
 rule:
   pattern: "if $VAR is None:\n    $VAR = $DEFAULT\n"
@@ -534,7 +534,7 @@ language: python
 severity: info
 message: "`if x: return True` - combine with later condition or `return x or ...`"
 metadata:
-  weight: 2
+  weight: 1
   category: slop
 rule:
   kind: if_statement
@@ -552,7 +552,7 @@ language: python
 severity: info
 message: "`if not isinstance(x, T): return err` - use type hints or a schema validator"
 metadata:
-  weight: 2
+  weight: 1
   category: slop
 rule:
   kind: if_statement
@@ -560,10 +560,10 @@ rule:
 ---
 id: defensive-if-return-same
 language: python
-severity: warning
+severity: info
 message: "`if x: return x` - use `return x or None` (or just `return x`)"
 metadata:
-  weight: 2
+  weight: 1
   category: slop
 rule:
   kind: if_statement
@@ -574,7 +574,7 @@ language: python
 severity: warning
 message: "`return x if x else None` - use `return x or None`"
 metadata:
-  weight: 2
+  weight: 5
   category: slop
 rule:
   kind: return_statement
@@ -587,7 +587,7 @@ language: python
 severity: warning
 message: "`if c: pass else: ...` - invert to `if not c: ...`"
 metadata:
-  weight: 2
+  weight: 5
   category: slop
 rule:
   kind: if_statement
@@ -607,7 +607,7 @@ language: python
 severity: warning
 message: "`x if x else []` - use `x or []`"
 metadata:
-  weight: 2
+  weight: 5
   category: slop
 rule:
   kind: conditional_expression
@@ -620,7 +620,7 @@ language: python
 severity: warning
 message: "`if c: return r; return r` - drop the guard, both paths return the same value"
 metadata:
-  weight: 4
+  weight: 5
   category: slop
 rule:
   kind: if_statement
@@ -637,7 +637,7 @@ language: python
 severity: warning
 message: "`if c: return f(a) else: return f(b)` - use `return f(a if c else b)`"
 metadata:
-  weight: 4
+  weight: 5
   category: slop
 rule:
   kind: if_statement
@@ -652,7 +652,7 @@ language: python
 severity: warning
 message: "`if c: lst.append(a) else: lst.append(b)` - use `lst.append(a if c else b)`"
 metadata:
-  weight: 4
+  weight: 5
   category: slop
 rule:
   kind: if_statement
@@ -667,7 +667,7 @@ language: python
 severity: warning
 message: "`if c: lst.extend(a) else: lst.extend(b)` - use `lst.extend(a if c else b)`"
 metadata:
-  weight: 4
+  weight: 5
   category: slop
 rule:
   kind: if_statement
@@ -682,7 +682,7 @@ language: python
 severity: warning
 message: "`if c: d[k] = a else: d[k] = b` - use `d[k] = a if c else b`"
 metadata:
-  weight: 4
+  weight: 5
   category: slop
 rule:
   kind: if_statement
@@ -697,7 +697,7 @@ language: python
 severity: warning
 message: "`if c: x = f(a) else: x = f(b)` - use `x = f(a if c else b)`"
 metadata:
-  weight: 4
+  weight: 5
   category: slop
 rule:
   kind: if_statement
@@ -712,7 +712,7 @@ language: python
 severity: warning
 message: "`if c: return (a, b) else: return (x, b)` - use `return (a if c else x, b)`"
 metadata:
-  weight: 3
+  weight: 5
   category: slop
 rule:
   kind: if_statement
@@ -733,7 +733,7 @@ language: python
 severity: info
 message: "Consecutive `if not x: return False` before a final return - collapse to `return x and y and ...`"
 metadata:
-  weight: 4
+  weight: 1
   category: slop
 rule:
   kind: if_statement
@@ -751,7 +751,7 @@ language: python
 severity: warning
 message: "Multiple `re.search` returning same value - combine patterns with `|` or loop over a list"
 metadata:
-  weight: 4
+  weight: 5
   category: slop
 rule:
   kind: if_statement
@@ -764,7 +764,7 @@ language: python
 severity: warning
 message: os.path.isfile guard before open is redundant and race-prone; use try/except OSError
 metadata:
-  weight: 3
+  weight: 5
   category: slop
 rule:
   kind: if_statement
@@ -783,7 +783,7 @@ language: python
 severity: warning
 message: "(x or '') if x else '' - the 'or' branch already handles None"
 metadata:
-  weight: 3
+  weight: 5
   category: slop
 rule:
   pattern: "($X or $EMPTY) if $X else $EMPTY"
@@ -793,7 +793,7 @@ language: python
 severity: info
 message: "`if not isinstance(x, T): raise` + `if not x: raise` - collapse to one guard (`or` the conditions or narrow via schema)"
 metadata:
-  weight: 3
+  weight: 1
   category: slop
 rule:
   kind: if_statement
@@ -809,7 +809,7 @@ language: python
 severity: info
 message: "`v, err = f(...); if err: return err` - raise typed exceptions instead of Go-style `(value, err)` tuples"
 metadata:
-  weight: 3
+  weight: 1
   category: slop
 rule:
   kind: expression_statement
@@ -831,10 +831,10 @@ rule:
 ---
 id: optional-param-self-getter-fallback
 language: python
-severity: hint
+severity: info
 message: "`x = x if x is not None else self.getter()` as a default - drop the optional param and read from `self` directly"
 metadata:
-  weight: 2
+  weight: 1
   category: slop
 rule:
   pattern: "$VAR = $VAR if $VAR is not None else self.$GETTER()"
@@ -844,7 +844,7 @@ language: python
 severity: info
 message: "`if not isinstance(x, int): raise` + `if x < N: raise` - one validator (`ensure_positive_int`) or `Annotated[int, Ge(N)]`"
 metadata:
-  weight: 3
+  weight: 1
   category: slop
 rule:
   kind: if_statement
