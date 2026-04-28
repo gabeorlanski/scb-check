@@ -19,6 +19,25 @@ if TYPE_CHECKING:
     import pytest
 
 
+_REPORT_KEYS = {
+    "verbosity",
+    "erosion",
+    "cog_erosion",
+    "files_scanned",
+    "total_loc",
+    "verbosity_flagged_loc",
+    "clone_loc",
+    "ast_grep_flagged_loc",
+    "total_functions",
+    "high_cc_functions",
+    "high_cog_functions",
+    "total_mass",
+    "high_cc_mass",
+    "total_cog_mass",
+    "high_cog_mass",
+}
+
+
 def _fake_chained_dict_get_hit(
     files: tuple[Path, ...],
     _rules_path: Path,
@@ -63,23 +82,38 @@ def test_check_report_json(
 
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
-    assert payload.keys() == {
-        "verbosity",
-        "erosion",
-        "cog_erosion",
-        "files_scanned",
-        "total_loc",
-        "verbosity_flagged_loc",
-        "clone_loc",
-        "ast_grep_flagged_loc",
-        "total_functions",
-        "high_cc_functions",
-        "high_cog_functions",
-        "total_mass",
-        "high_cc_mass",
-        "total_cog_mass",
-        "high_cog_mass",
-    }
+    assert payload.keys() == _REPORT_KEYS
+
+
+def test_check_output_format_json(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The check --output-format json option emits a JSON summary."""
+    corpus = Path(__file__).parent / "fixtures" / "corpus"
+    config_override = tmp_path / "scb-check.toml"
+    config_override.write_text("", encoding="utf-8")
+    monkeypatch.setattr(
+        "scb_check.pipeline.run_sg", lambda _files, _rules_path: (),
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "check",
+            "--config",
+            str(config_override),
+            "--output-format",
+            "json",
+            str(corpus),
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload.keys() == _REPORT_KEYS
+
 
 
 def test_check_human_findings(
@@ -168,6 +202,32 @@ def test_check_rejects_report_with_duplicates_only(
     output = click.unstyle(result.output)
     assert result.exit_code == 2
     assert "--report" in output
+    assert "--duplicates-only" in output
+    assert "cannot be used together" in output
+
+
+def test_check_rejects_json_output_with_duplicates_only(
+    tmp_path: Path,
+) -> None:
+    """JSON output cannot be combined with duplicate-only human filtering."""
+    source = tmp_path / "sample.py"
+    source.write_text("x = 1\n", encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "check",
+            "--output-format",
+            "json",
+            "--duplicates-only",
+            str(source),
+        ],
+    )
+
+    output = click.unstyle(result.output)
+    assert result.exit_code == 2
+    assert "--output-format json" in output
     assert "--duplicates-only" in output
     assert "cannot be used together" in output
 

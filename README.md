@@ -46,7 +46,8 @@ uv export --format requirements.txt --all-groups --no-emit-project --frozen --ou
 
 ```bash
 scb-check check PATH                    # human-readable flags
-scb-check check PATH --report           # JSON report with verbosity/erosion scores
+scb-check check PATH --output-format json  # JSON report with verbosity/erosion scores
+scb-check check PATH --report           # shortcut for --output-format json
 scb-check check PATH -v / --verbosity   # add info logging
 scb-check check PATH -vv                # add debug logging
 scb-check check PATH --config FILE      # explicit config path

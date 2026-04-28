@@ -12,6 +12,7 @@ from token import INDENT
 from token import NEWLINE
 from token import NL
 from tokenize import TokenError
+from tokenize import TokenInfo
 from tokenize import generate_tokens
 from typing import NamedTuple
 
@@ -222,19 +223,7 @@ def _scan_directives(source: str) -> _DirectiveScan:
     boundary_lines: list[int] = []
 
     for token in generate_tokens(iter(source.splitlines(keepends=True)).__next__):
-        if token.type == COMMENT:
-            comment_text = token.string.removeprefix("#").strip()
-            comments[token.start[0]] = (
-                comment_text,
-                token.line[: token.start[1]].strip() != "",
-            )
-            ignore_directive = _match_ignore_directive(comment_text)
-            if ignore_directive is not None:
-                ignore_matches.append((token.start[0], ignore_directive))
-            elif BOUNDARY_DIRECTIVE_RE.match(comment_text):
-                boundary_lines.append(token.start[0])
-        elif token.type not in NON_CODE_TOKEN_TYPES:
-            code_lines.add(token.start[0])
+        _scan_token(token, comments, code_lines, ignore_matches, boundary_lines)
 
     return _DirectiveScan(
         comments_by_line=comments,
@@ -242,6 +231,31 @@ def _scan_directives(source: str) -> _DirectiveScan:
         ignore_matches=tuple(ignore_matches),
         boundary_lines=tuple(boundary_lines),
     )
+
+
+def _scan_token(
+    token: TokenInfo,
+    comments: dict[int, tuple[str, bool]],
+    code_lines: set[int],
+    ignore_matches: list[tuple[int, str]],
+    boundary_lines: list[int],
+) -> None:
+    if token.type != COMMENT:
+        if token.type not in NON_CODE_TOKEN_TYPES:
+            code_lines.add(token.start[0])
+        return
+
+    comment_text = token.string.removeprefix("#").strip()
+    comments[token.start[0]] = (
+        comment_text,
+        token.line[: token.start[1]].strip() != "",
+    )
+    ignore_directive = _match_ignore_directive(comment_text)
+    if ignore_directive is not None:
+        ignore_matches.append((token.start[0], ignore_directive))
+        return
+    if BOUNDARY_DIRECTIVE_RE.match(comment_text):
+        boundary_lines.append(token.start[0])
 
 
 def _match_ignore_directive(comment_text: str) -> str | None:

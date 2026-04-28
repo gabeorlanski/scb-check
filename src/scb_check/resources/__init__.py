@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator
+from collections.abc import Mapping
 from contextlib import contextmanager
 from importlib import resources
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+from typing import cast
 
 import yaml
 
@@ -78,18 +80,29 @@ def load_thresholds(rules_path: Path) -> dict[str, int]:
     with rules_path.open("r", encoding="utf-8") as rules_file:
         documents = tuple(yaml.safe_load_all(rules_file))
 
-    thresholds: dict[str, int] = {}
-    for document in documents:
-        if not isinstance(document, dict):
-            continue
-        rule_id = document.get("id")
-        metadata = document.get("metadata")
-        if not isinstance(rule_id, str) or not isinstance(metadata, dict):
-            continue
-        min_count = metadata.get("min_file_count")
-        if isinstance(min_count, int) and min_count > 1:
-            thresholds[rule_id] = min_count
-    return thresholds
+    return dict(
+        threshold
+        for document in documents
+        if (threshold := _threshold(document)) is not None
+    )
+
+
+def _threshold(document: object) -> tuple[str, int] | None:  # scbc ignore[object-type-annotation]
+    # scbc boundary: normalize rule metadata loaded from YAML.
+    if not isinstance(document, Mapping):
+        return None
+
+    document_data = cast("Mapping[object, object]", document)
+    rule_id = document_data.get("id")
+    metadata = document_data.get("metadata")
+    if not isinstance(rule_id, str) or not isinstance(metadata, Mapping):
+        return None
+
+    metadata_data = cast("Mapping[object, object]", metadata)
+    min_count = metadata_data.get("min_file_count")
+    if isinstance(min_count, int) and min_count > 1:
+        return (rule_id, min_count)
+    return None
 
 
 @contextmanager

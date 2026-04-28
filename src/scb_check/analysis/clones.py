@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from scb_check.analysis.loc import sloc_line_numbers
+from scb_check.analysis.strings import string_prefix
 from scb_check.models import CloneBlock
 
 if TYPE_CHECKING:
@@ -171,17 +172,8 @@ def _is_plain_string_statement(node: Node) -> bool:
     if text is None:
         return False
 
-    prefix = _string_prefix(text.decode("utf-8"))
+    prefix = string_prefix(text.decode("utf-8"))
     return "b" not in prefix and "f" not in prefix
-
-
-def _string_prefix(literal: str) -> str:
-    prefix_chars: list[str] = []
-    for character in literal:
-        if character in {'"', "'"}:
-            break
-        prefix_chars.append(character.lower())
-    return "".join(prefix_chars)
 
 
 def _hash_ast_subtree(node: Node) -> str:

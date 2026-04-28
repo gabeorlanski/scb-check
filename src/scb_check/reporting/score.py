@@ -2,63 +2,92 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from scb_check.models import Flags
+from scb_check.models import ParsedSymbol
 from scb_check.models import Report
+
+
+@dataclass(frozen=True, slots=True)
+class _VerbosityCounts:
+    verbosity: float
+    flagged_loc: int
+    clone_loc: int
+    ast_loc: int
+
+
+@dataclass(frozen=True, slots=True)
+class _MassShare:
+    score: float
+    total: float
+    flagged: float
 
 
 def compute_report(flags: Flags) -> Report:
     """Compute verbosity and erosion summary metrics from `flags`."""
     total_loc = sum(loc for _, loc in flags.total_loc_by_file)
+    verbosity = _verbosity_counts(flags, total_loc)
+    cyclomatic = _mass_share(flags.all_functions, flags.high_cc_functions, "cc")
+    cognitive = _mass_share(flags.all_functions, flags.high_cog_functions, "cog")
+
+    return Report(
+        verbosity=verbosity.verbosity,
+        erosion=cyclomatic.score,
+        cog_erosion=cognitive.score,
+        files_scanned=len(flags.total_loc_by_file),
+        total_loc=total_loc,
+        verbosity_flagged_loc=verbosity.flagged_loc,
+        clone_loc=verbosity.clone_loc,
+        ast_grep_flagged_loc=verbosity.ast_loc,
+        total_functions=len(flags.all_functions),
+        high_cc_functions=len(flags.high_cc_functions),
+        high_cog_functions=len(flags.high_cog_functions),
+        total_mass=cyclomatic.total,
+        high_cc_mass=cyclomatic.flagged,
+        total_cog_mass=cognitive.total,
+        high_cog_mass=cognitive.flagged,
+    )
+
+
+def _verbosity_counts(flags: Flags, total_loc: int) -> _VerbosityCounts:
+    if not total_loc:
+        return _VerbosityCounts(
+            verbosity=0.0,
+            flagged_loc=0,
+            clone_loc=0,
+            ast_loc=0,
+        )
+
     clone_lines_by_file = {
         entry.file: entry.lines for entry in flags.clone_sloc_lines_by_file
     }
     ast_lines_by_file = {
         entry.file: entry.lines for entry in flags.ast_sloc_lines_by_file
     }
-
-    clone_loc = sum(len(lines) for lines in clone_lines_by_file.values())
-    ast_loc = sum(len(lines) for lines in ast_lines_by_file.values())
-    verbosity_flagged_loc = _count_union_lines(
-        clone_lines_by_file,
-        ast_lines_by_file,
+    flagged_loc = _count_union_lines(clone_lines_by_file, ast_lines_by_file)
+    return _VerbosityCounts(
+        verbosity=flagged_loc / total_loc,
+        flagged_loc=flagged_loc,
+        clone_loc=sum(len(lines) for lines in clone_lines_by_file.values()),
+        ast_loc=sum(len(lines) for lines in ast_lines_by_file.values()),
     )
-    if total_loc:
-        verbosity = verbosity_flagged_loc / total_loc
-    else:
-        verbosity = 0.0
-        verbosity_flagged_loc = 0
-        clone_loc = 0
-        ast_loc = 0
 
-    total_mass = sum(symbol.cc_mass() for symbol in flags.all_functions)
-    high_cc_mass = sum(symbol.cc_mass() for symbol in flags.high_cc_functions)
-    erosion = (high_cc_mass / total_mass) if total_mass else 0.0
 
-    total_cog_mass = sum(symbol.cog_mass() for symbol in flags.all_functions)
-    high_cog_mass = sum(
-        symbol.cog_mass() for symbol in flags.high_cog_functions
-    )
-    cog_erosion = (high_cog_mass / total_cog_mass) if total_cog_mass else 0.0
+def _mass_share(
+    all_functions: tuple[ParsedSymbol, ...],
+    flagged_functions: tuple[ParsedSymbol, ...],
+    kind: str,
+) -> _MassShare:
+    total = sum(_mass(symbol, kind) for symbol in all_functions)
+    flagged = sum(_mass(symbol, kind) for symbol in flagged_functions)
+    score = flagged / total if total else 0.0
+    return _MassShare(score=score, total=total, flagged=flagged)
 
-    return Report(
-        verbosity=verbosity,
-        erosion=erosion,
-        cog_erosion=cog_erosion,
-        files_scanned=len(flags.total_loc_by_file),
-        total_loc=total_loc,
-        verbosity_flagged_loc=verbosity_flagged_loc,
-        clone_loc=clone_loc,
-        ast_grep_flagged_loc=ast_loc,
-        total_functions=len(flags.all_functions),
-        high_cc_functions=len(flags.high_cc_functions),
-        high_cog_functions=len(flags.high_cog_functions),
-        total_mass=total_mass,
-        high_cc_mass=high_cc_mass,
-        total_cog_mass=total_cog_mass,
-        high_cog_mass=high_cog_mass,
-    )
+
+def _mass(symbol: ParsedSymbol, kind: str) -> float:
+    return symbol.cc_mass() if kind == "cc" else symbol.cog_mass()
 
 
 def _count_union_lines(

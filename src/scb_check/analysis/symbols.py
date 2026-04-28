@@ -301,7 +301,7 @@ def _call_name(node: Node) -> str | None:
         return None
     if target.type in {"identifier", "attribute"}:
         return _text(target)
-    return None
+    return None  # scbc ignore[redundant-return-none]
 
 
 def _root_name(name: str) -> str:
@@ -312,9 +312,7 @@ def _resolve_call_name(name: str, imports: dict[str, str]) -> str:
     root = _root_name(name)
     if root not in imports:
         return name
-    if root == name:
-        return imports[root]
-    return imports[root] + name[len(root) :]
+    return imports[root] if root == name else f"{imports[root]}{name[len(root) :]}"
 
 
 def _imports_from_node(node: Node) -> dict[str, str]:
@@ -367,7 +365,7 @@ def _aliased_import_parts(node: Node) -> tuple[str, str] | None:
     ]
     if len(names) >= _MIN_ALIASED_IMPORT_PARTS:
         return (_text(names[0]), _text(names[-1]))
-    return None
+    return None  # scbc ignore[redundant-return-none]
 
 
 def _qualified_import(module_name: str, imported: str) -> str:

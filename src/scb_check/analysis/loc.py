@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from scb_check.analysis.parse import ParseError
 from scb_check.analysis.parse import parse_source
+from scb_check.analysis.strings import string_prefix
 
 if TYPE_CHECKING:
     from tree_sitter import Node
@@ -110,14 +111,5 @@ def _is_plain_string_node(node: Node) -> bool:
     if text is None:
         return False
 
-    prefix = _string_prefix(text.decode("utf-8"))
+    prefix = string_prefix(text.decode("utf-8"))
     return "b" not in prefix and "f" not in prefix
-
-
-def _string_prefix(literal: str) -> str:
-    prefix_chars: list[str] = []
-    for character in literal:
-        if character in {'"', "'"}:
-            break
-        prefix_chars.append(character.lower())
-    return "".join(prefix_chars)

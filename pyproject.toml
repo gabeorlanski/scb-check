@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "scb-check"
-version = "0.1.1"
+version = "0.1.2"
 description = "CLI for measuring verbosity and erosion metrics in Python codebases"
 readme = "README.md"
 license = "MIT"
@@ -49,6 +49,9 @@ markers = [
 
 [tool.ty.src]
 exclude = ["tests/fixtures/"]
+
+[tool.scb-check]
+exclude = ["scratch/**", "tests/**"]
 
 [tool.ruff]
 exclude = [".venv", ".gitignore", ".dockerignore"]

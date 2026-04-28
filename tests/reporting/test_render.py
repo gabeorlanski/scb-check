@@ -266,6 +266,74 @@ def test_renders_multiline_ast_hit(
     assert "^" not in output
 
 
+def test_clone_line_count_and_body_exclude_docstrings(
+    tmp_path: Path,
+) -> None:
+    """Clone rendering counts and shows only duplicated SLOC lines."""
+    file_path = tmp_path / "sample.py"
+    file_path.write_text(
+        "\n".join(
+            [
+                "def first(value):",
+                '    """Explain the first helper."""',
+                "    current = value + 1",
+                "    return current",
+                "",
+                "def second(value):",
+                '    """Explain the second helper."""',
+                "    current = value + 2",
+                "    return current",
+            ],
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    clone_a = CloneBlock(
+        file=file_path,
+        start_line=1,
+        end_line=4,
+        group_hash="abc123",
+        instance_count=2,
+        other_instances=((file_path, 6),),
+        first_lines=(
+            "def first(value):",
+            "    current = value + 1",
+            "    return current",
+        ),
+    )
+    clone_b = CloneBlock(
+        file=file_path,
+        start_line=6,
+        end_line=9,
+        group_hash="abc123",
+        instance_count=2,
+        other_instances=((file_path, 1),),
+        first_lines=(
+            "def second(value):",
+            "    current = value + 2",
+            "    return current",
+        ),
+    )
+    flags = Flags.from_parts(
+        clones=[clone_a, clone_b],
+        total_loc_by_file=[(file_path, 6)],
+        clone_sloc_lines_by_file=[(file_path, {1, 3, 4, 6, 8, 9})],
+    )
+    source_lines = {
+        file_path: tuple(file_path.read_text(encoding="utf-8").splitlines()),
+    }
+
+    output = render_flags(flags, source_lines)
+
+    assert "duplicate-structure: duplicated block (3 lines, 2 instances)" in output
+    assert "Explain the first helper" not in output
+    assert "Explain the second helper" not in output
+    assert "1 │ def first(value):" in output
+    assert "3 │     current = value + 1" in output
+    assert "6 │ def second(value):" in output
+    assert "8 │     current = value + 2" in output
+
+
 def test_renders_full_clone_span(
     tmp_path: Path,
 ) -> None:

@@ -23,12 +23,14 @@ from scb_check.reporting.render import render_flags
 from scb_check.reporting.score import compute_report
 
 _ContextSetting = str | int | bool | tuple[str, ...] | list[str] | None
-_OutputMode = Literal["report", "duplicates"]
+_OutputFormat = Literal["human", "json"]
 _FlagValue = Literal[False, True]
-_OUTPUT_MODE_KEY = "scb_check_output_mode"
-_OUTPUT_MODES: dict[str, _OutputMode] = {
-    "report": "report",
-    "duplicates": "duplicates",
+_OUTPUT_FORMAT_KEY = "scb_check_output_format"
+_REPORT_KEY = "scb_check_report"
+_DUPLICATES_ONLY_KEY = "scb_check_duplicates_only"
+_OUTPUT_FORMATS: dict[str, _OutputFormat] = {
+    "human": "human",
+    "json": "json",
 }
 
 
@@ -55,53 +57,86 @@ class _CheckCommand(TyperCommand):
         **kwargs: Unpack[_TyperCommandKwargs],
     ) -> None:
         params = kwargs.get("params")
-        kwargs["params"] = [*_output_mode_options(), *(params or [])]
+        kwargs["params"] = [*_check_options(), *(params or [])]
         super().__init__(name, **kwargs)
 
 
-def _output_mode_options() -> list[click.Option]:
+def _check_options() -> list[click.Option]:
     return [
+        click.Option(
+            ["--output-format"],
+            type=click.Choice(tuple(_OUTPUT_FORMATS)),
+            default="human",
+            show_default=True,
+            expose_value=False,
+            callback=_store_output_format,
+            help="Choose output format (default: human).",
+        ),
         click.Option(
             ["--report"],
             is_flag=True,
             expose_value=False,
-            callback=_store_output_mode("report"),
+            callback=_store_flag(_REPORT_KEY),
             help="Emit JSON report.",
         ),
         click.Option(
             ["--duplicates-only"],
             is_flag=True,
             expose_value=False,
-            callback=_store_output_mode("duplicates"),
+            callback=_store_flag(_DUPLICATES_ONLY_KEY),
             help="Only emit duplicate-structure findings.",
         ),
     ]
 
 
-def _store_output_mode(
-    mode: _OutputMode,
+def _store_output_format(
+    ctx: click.Context,
+    param: click.Parameter,
+    value: str,
+) -> None:
+    if param.name is None:
+        return
+    if ctx.get_parameter_source(param.name) is not click.core.ParameterSource.COMMANDLINE:
+        return
+    if value in _OUTPUT_FORMATS:
+        ctx.meta[_OUTPUT_FORMAT_KEY] = value
+
+
+def _store_flag(
+    key: str,
 ) -> Callable[[click.Context, click.Parameter, _FlagValue], None]:
     def callback(
         ctx: click.Context,
         _param: click.Parameter,
         value: _FlagValue,
     ) -> None:
-        if not value:
-            return
-
-        existing = ctx.meta.get(_OUTPUT_MODE_KEY)
-        if existing is not None and existing != mode:
-            raise click.BadParameter(
-                "`--report` and `--duplicates-only` cannot be used together",
-            )
-        ctx.meta[_OUTPUT_MODE_KEY] = mode
+        if value:
+            ctx.meta[key] = True
 
     return callback
 
 
-def _output_mode(ctx: typer.Context) -> _OutputMode | None:
-    value = ctx.meta.get(_OUTPUT_MODE_KEY)
-    return _OUTPUT_MODES.get(value) if isinstance(value, str) else None
+def _resolve_output(ctx: typer.Context) -> tuple[_OutputFormat, bool]:
+    explicit_format = _explicit_output_format(ctx)
+    report = bool(ctx.meta.get(_REPORT_KEY, False))
+    duplicates_only = bool(ctx.meta.get(_DUPLICATES_ONLY_KEY, False))
+
+    if report and duplicates_only:
+        raise ValueError("`--report` and `--duplicates-only` cannot be used together")
+    if report and explicit_format == "human":
+        raise ValueError("`--report` and `--output-format human` cannot be used together")
+
+    output_format: _OutputFormat = "json" if report else explicit_format or "human"
+    if output_format == "json" and duplicates_only:
+        raise ValueError(
+            "`--output-format json` and `--duplicates-only` cannot be used together",
+        )
+    return output_format, duplicates_only
+
+
+def _explicit_output_format(ctx: typer.Context) -> _OutputFormat | None:
+    value = ctx.meta.get(_OUTPUT_FORMAT_KEY)
+    return _OUTPUT_FORMATS.get(value) if isinstance(value, str) else None
 
 
 CHECK_COMMAND_CLASS = _CheckCommand
@@ -133,6 +168,12 @@ def check(
     ] = False,
 ) -> None:
     """Run analysis for `path` and emit the selected output format."""
+    try:
+        output_format, duplicates_only = _resolve_output(ctx)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+
     configure_logging(verbosity)
 
     try:
@@ -146,14 +187,13 @@ def check(
         typer.echo(f"no Python files could be parsed at {path}", err=True)
         raise typer.Exit(code=2)
 
-    output_mode = _output_mode(ctx)
-    if output_mode == "report":
+    if output_format == "json":
         report_payload = compute_report(result.flags)
         json.dump(asdict(report_payload), sys.stdout)
         return
 
     flags = result.flags
-    if output_mode == "duplicates":
+    if duplicates_only:
         flags = replace(
             result.flags,
             ast_grep_hits=(),

@@ -22,6 +22,18 @@ def run_sg(files: tuple[Path, ...], rules_path: Path) -> tuple[AstGrepHit, ...]:
     hard failure, so scb-check still produces clone and erosion numbers.
     Line and column numbers in the returned hits are 1-indexed.
     """
+    command = _command(files, rules_path)
+    if command is None:
+        return ()
+
+    result = _run_command(command)
+    if result is None:
+        return ()
+
+    return _parse_hits(result.stdout)
+
+
+def _command(files: tuple[Path, ...], rules_path: Path) -> list[str] | None:
     if not files or not rules_path.exists():
         logger.warning(
             "no files to scan or rules file missing",
@@ -29,14 +41,14 @@ def run_sg(files: tuple[Path, ...], rules_path: Path) -> tuple[AstGrepHit, ...]:
             rules_path=rules_path,
             rules_exists=rules_path.exists(),
         )
-        return ()
+        return None
 
     sg_binary = shutil.which("sg")
     if sg_binary is None:
         logger.warning("ast-grep binary not found", binary="sg")
-        return ()
+        return None
 
-    command = [
+    return [
         sg_binary,
         "scan",
         "--json=stream",
@@ -44,6 +56,9 @@ def run_sg(files: tuple[Path, ...], rules_path: Path) -> tuple[AstGrepHit, ...]:
         str(rules_path),
         *[str(path) for path in files],
     ]
+
+
+def _run_command(command: list[str]) -> subprocess.CompletedProcess[str] | None:
     try:
         result = subprocess.run(  # noqa: S603
             command,
@@ -53,47 +68,54 @@ def run_sg(files: tuple[Path, ...], rules_path: Path) -> tuple[AstGrepHit, ...]:
         )
     except OSError as exc:
         logger.warning("failed to execute ast-grep", error=str(exc))
-        return ()
+        return None
 
-    if result.returncode != 0:
-        logger.warning(
-            "ast-grep returned non-zero",
-            returncode=result.returncode,
-            stderr=result.stderr.strip(),
-        )
-        return ()
+    if result.returncode == 0:
+        return result
 
-    hits: list[AstGrepHit] = []
-    for line in result.stdout.splitlines():
-        if not line.strip():
-            continue
+    logger.warning(
+        "ast-grep returned non-zero",
+        returncode=result.returncode,
+        stderr=result.stderr.strip(),
+    )
+    return None  # scbc ignore[redundant-return-none]
 
-        try:
-            payload = json.loads(line)
-            start = payload["range"]["start"]
-            end = payload["range"]["end"]
-            file_path = Path(payload["file"]).resolve()
-            hits.append(
-                AstGrepHit(
-                    file=file_path,
-                    line=int(start["line"]) + 1,
-                    end_line=int(end["line"]) + 1,
-                    col=int(start["column"]),
-                    end_col=int(end["column"]),
-                    rule_id=str(payload["ruleId"]),
-                    matched_text=str(payload["text"]),
-                    message=str(payload["message"]),
-                ),
-            )
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-            logger.warning("failed to parse ast-grep output", error=str(exc))
 
-    hits.sort(
-        key=lambda hit: (
-            hit.file.as_posix(),
-            hit.line,
-            hit.col,
-            hit.rule_id,
+def _parse_hits(stdout: str) -> tuple[AstGrepHit, ...]:
+    hits = tuple(
+        hit
+        for line in stdout.splitlines()
+        if line.strip()
+        if (hit := _parse_hit(line)) is not None
+    )
+    return tuple(
+        sorted(
+            hits,
+            key=lambda hit: (
+                hit.file.as_posix(),
+                hit.line,
+                hit.col,
+                hit.rule_id,
+            ),
         ),
     )
-    return tuple(hits)
+
+
+def _parse_hit(line: str) -> AstGrepHit | None:
+    try:
+        payload = json.loads(line)
+        start = payload["range"]["start"]
+        end = payload["range"]["end"]
+        return AstGrepHit(
+            file=Path(payload["file"]).resolve(),
+            line=int(start["line"]) + 1,
+            end_line=int(end["line"]) + 1,
+            col=int(start["column"]),
+            end_col=int(end["column"]),
+            rule_id=str(payload["ruleId"]),
+            matched_text=str(payload["text"]),
+            message=str(payload["message"]),
+        )
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        logger.warning("failed to parse ast-grep output", error=str(exc))
+        return None

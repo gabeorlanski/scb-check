@@ -18,6 +18,9 @@ def render_flags(
 ) -> str:
     """Render `flags` with surrounding source controlled by `context_lines`."""
     rendered: list[tuple[tuple[str, int, int], str]] = []
+    clone_sloc_lines_by_file = {
+        entry.file: entry.lines for entry in flags.clone_sloc_lines_by_file
+    }
 
     for group in _group_clones(flags.clones):
         anchor = group[0]
@@ -28,6 +31,7 @@ def render_flags(
                 _render_clone_group(
                     group,
                     source_lines_by_file,
+                    clone_sloc_lines_by_file,
                 ),
             ),
         )
@@ -90,13 +94,19 @@ def _group_clones(
 def _make_clone_body_lines(
     clone: CloneBlock,
     source_lines_by_file: dict[Path, tuple[str, ...]],
+    clone_sloc_lines_by_file: dict[Path, frozenset[int]],
     line_number_width: int,
     pad: str,
 ) -> list[str]:
     return [
         f"{pad} ┌─ {_display_path(clone.file)}:{clone.start_line}",
         f"{pad} │",
-        *_clone_body_lines(clone, source_lines_by_file, line_number_width),
+        *_clone_body_lines(
+            clone,
+            source_lines_by_file,
+            clone_sloc_lines_by_file,
+            line_number_width,
+        ),
         f"{pad} │",
     ]
 
@@ -104,9 +114,10 @@ def _make_clone_body_lines(
 def _render_clone_group(
     instances: tuple[CloneBlock, ...],
     source_lines_by_file: dict[Path, tuple[str, ...]],
+    clone_sloc_lines_by_file: dict[Path, frozenset[int]],
 ) -> str:
     anchor = instances[0]
-    line_count = anchor.end_line - anchor.start_line + 1
+    line_count = _clone_line_count(anchor, clone_sloc_lines_by_file)
     line_number_width = max(len(str(clone.end_line)) for clone in instances)
     pad = " " * line_number_width
 
@@ -123,6 +134,7 @@ def _render_clone_group(
             + _make_clone_body_lines(
                 clone,
                 source_lines_by_file,
+                clone_sloc_lines_by_file,
                 line_number_width,
                 pad,
             ),
@@ -133,21 +145,50 @@ def _render_clone_group(
 def _clone_body_lines(
     clone: CloneBlock,
     source_lines_by_file: dict[Path, tuple[str, ...]],
+    clone_sloc_lines_by_file: dict[Path, frozenset[int]],
     line_number_width: int,
 ) -> list[str]:
     source_lines = source_lines_by_file.get(clone.file, ())
     if source_lines:
-        start_line = max(1, min(clone.start_line, len(source_lines)))
-        end_line = max(start_line, min(clone.end_line, len(source_lines)))
         return [
             f"{line_number:>{line_number_width}} │ "
             f"{_line_at(source_lines, line_number)}"
-            for line_number in range(start_line, end_line + 1)
+            for line_number in _clone_source_line_numbers(
+                clone,
+                source_lines,
+                clone_sloc_lines_by_file,
+            )
         ]
     return [
         f"{clone.start_line + offset:>{line_number_width}} │ {text}"
         for offset, text in enumerate(clone.first_lines)
     ]
+
+
+def _clone_line_count(
+    clone: CloneBlock,
+    clone_sloc_lines_by_file: dict[Path, frozenset[int]],
+) -> int:
+    if clone.file not in clone_sloc_lines_by_file:
+        return clone.end_line - clone.start_line + 1
+    sloc_lines = clone_sloc_lines_by_file[clone.file]
+    return sum(
+        1 for line in sloc_lines if clone.start_line <= line <= clone.end_line
+    )
+
+
+def _clone_source_line_numbers(
+    clone: CloneBlock,
+    source_lines: tuple[str, ...],
+    clone_sloc_lines_by_file: dict[Path, frozenset[int]],
+) -> tuple[int, ...]:
+    start_line = max(1, min(clone.start_line, len(source_lines)))
+    end_line = max(start_line, min(clone.end_line, len(source_lines)))
+    line_numbers = tuple(range(start_line, end_line + 1))
+    if clone.file not in clone_sloc_lines_by_file:
+        return line_numbers
+    sloc_lines = clone_sloc_lines_by_file[clone.file]
+    return tuple(line for line in line_numbers if line in sloc_lines)
 
 
 def _render_ast_grep(

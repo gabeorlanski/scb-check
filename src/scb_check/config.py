@@ -116,38 +116,34 @@ def _tool_excludes(tool: dict[str, Any]) -> tuple[str, ...]:
 def _strings(
     value: object,  # scbc ignore[object-type-annotation]
 ) -> tuple[str, ...]:
-
-    if not isinstance(value, list):
-        return tuple()
-
-    patterns: list[str] = []
-    for entry in value:
-        if not isinstance(entry, str):
-            return tuple()
-        patterns.append(entry)
-    return tuple(patterns)
+    if isinstance(value, list) and all(isinstance(entry, str) for entry in value):
+        return tuple(str(entry) for entry in value)
+    return ()
 
 
 def _norm_patterns(patterns: tuple[str, ...]) -> tuple[str, ...]:
-    normalized_patterns: list[str] = []
-
-    for raw_pattern in patterns:
-        normalized = raw_pattern.strip().replace("\\", "/")
-        normalized = normalized.removeprefix("./")
-        normalized = normalized.lstrip("/")
-        if not normalized:
-            continue
-
-        if normalized.endswith("/"):
-            normalized_patterns.append(f"{normalized.rstrip('/')}/**")
-        elif any(char in normalized for char in "*?[]") or normalized.endswith(
-            ".py"
-        ):
-            normalized_patterns.append(normalized)
-        else:
-            normalized_patterns.extend((normalized, f"{normalized}/**"))
-
+    normalized_patterns = tuple(
+        normalized
+        for raw_pattern in patterns
+        for normalized in _norm_pattern(raw_pattern)
+    )
     return tuple(dict.fromkeys(normalized_patterns))
+
+
+def _norm_pattern(raw_pattern: str) -> tuple[str, ...]:
+    normalized = raw_pattern.strip().replace("\\", "/")
+    normalized = normalized.removeprefix("./")
+    normalized = normalized.lstrip("/")
+    if not normalized:
+        return ()
+
+    if normalized.endswith("/"):
+        return (f"{normalized.rstrip('/')}/**",)
+
+    if any(char in normalized for char in "*?[]") or normalized.endswith(".py"):
+        return (normalized,)
+
+    return (normalized, f"{normalized}/**")
 
 
 def _scb_table(
