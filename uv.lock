@@ -424,7 +424,7 @@ wheels = [
 
 [[package]]
 name = "scb-check"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "ast-grep-cli" },

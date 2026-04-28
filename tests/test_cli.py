@@ -18,6 +18,24 @@ if TYPE_CHECKING:
     import pytest
 
 
+def _fake_chained_dict_get_hit(
+    files: tuple[Path, ...],
+    _rules_path: Path,
+) -> tuple[AstGrepHit, ...]:
+    target = next(file for file in files if file.name == "module_c.py")
+    return (
+        AstGrepHit(
+            file=target,
+            line=2,
+            end_line=2,
+            col=12,
+            end_col=48,
+            rule_id="chained-dict-get",
+            matched_text='cfg.get("a", {}).get("b", {}).get("c")',
+        ),
+    )
+
+
 def test_check_report_json(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -72,24 +90,10 @@ def test_check_human_findings(
     config_override = tmp_path / "scb-check.toml"
     config_override.write_text("", encoding="utf-8")
 
-    def fake_ast_grep(
-        files: tuple[Path, ...],
-        _rules_path: Path,
-    ) -> tuple[AstGrepHit, ...]:
-        target = next(file for file in files if file.name == "module_c.py")
-        return (
-            AstGrepHit(
-                file=target,
-                line=2,
-                end_line=2,
-                col=12,
-                end_col=48,
-                rule_id="chained-dict-get",
-                matched_text='cfg.get("a", {}).get("b", {}).get("c")',
-            ),
-        )
-
-    monkeypatch.setattr("scb_check.pipeline.run_sg", fake_ast_grep)
+    monkeypatch.setattr(
+        "scb_check.pipeline.run_sg",
+        _fake_chained_dict_get_hit,
+    )
 
     runner = CliRunner()
     result = runner.invoke(
@@ -108,6 +112,62 @@ def test_check_human_findings(
         "cog_erosion: function `complex_route` exceeds cognitive complexity threshold"
         in result.stdout
     )
+
+
+def test_check_duplicates_only(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The structural duplicate mode suppresses other finding types."""
+    corpus = Path(__file__).parent / "fixtures" / "corpus"
+    config_override = tmp_path / "scb-check.toml"
+    config_override.write_text("", encoding="utf-8")
+    monkeypatch.setattr(
+        "scb_check.pipeline.run_sg",
+        _fake_chained_dict_get_hit,
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "check",
+            "--config",
+            str(config_override),
+            "--duplicates-only",
+            str(corpus),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "duplicate-structure:" in result.stdout
+    assert "warning[chained-dict-get]" not in result.stdout
+    assert "erosion:" not in result.stdout
+    assert "cog_erosion:" not in result.stdout
+
+
+def test_check_rejects_report_with_duplicates_only(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Report and duplicate-only output modes are mutually exclusive."""
+    source = tmp_path / "sample.py"
+    source.write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "scb_check.pipeline.run_sg",
+        lambda _files, _rules_path: (),
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        ["check", "--report", "--duplicates-only", str(source)],
+    )
+
+    assert result.exit_code == 2
+    assert "--report" in result.output
+    assert "--duplicates-only" in result.output
+    assert "cannot be used together" in result.output
 
 
 def test_check_missing_path() -> None:

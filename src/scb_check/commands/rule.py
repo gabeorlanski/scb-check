@@ -1,4 +1,4 @@
-"""Register and implement the `scb-check rule` command."""
+"""Implement the `scb-check rule` command."""
 
 from __future__ import annotations
 
@@ -11,25 +11,22 @@ import yaml
 from scb_check.resources import rule_texts
 
 
-def register_rule(app: typer.Typer) -> None:
-    """Register the `rule` subcommand on `app`."""
+def rule(
+    rule_name: Annotated[str, typer.Argument(help="ast-grep rule id")],
+) -> None:
+    """Print the bundled ast-grep rule matching `rule_name`."""
+    try:
+        rule_payload = _find_rule(rule_name)
+    except (OSError, yaml.YAMLError) as exc:
+        typer.echo(f"failed to load rules: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
 
-    @app.command("rule")
-    def rule(
-        rule_name: Annotated[str, typer.Argument(help="ast-grep rule id")],
-    ) -> None:
-        try:
-            rule_payload = _find_rule(rule_name)
-        except (OSError, yaml.YAMLError) as exc:
-            typer.echo(f"failed to load rules: {exc}", err=True)
-            raise typer.Exit(code=2) from exc
+    if rule_payload is None:
+        typer.echo(f"rule not found: {rule_name}", err=True)
+        raise typer.Exit(code=2)
 
-        if rule_payload is None:
-            typer.echo(f"rule not found: {rule_name}", err=True)
-            raise typer.Exit(code=2)
-
-        rendered = yaml.safe_dump(rule_payload, sort_keys=False).rstrip()
-        typer.echo(rendered)
+    rendered = yaml.safe_dump(rule_payload, sort_keys=False).rstrip()
+    typer.echo(rendered)
 
 
 def _find_rule(rule_name: str) -> dict[str, str] | None:

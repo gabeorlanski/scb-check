@@ -7,8 +7,9 @@ from typing import Annotated
 
 import typer
 
-from scb_check.commands.check import register_check
-from scb_check.commands.rule import register_rule
+from scb_check.commands.check import CHECK_COMMAND_CLASS
+from scb_check.commands.check import check
+from scb_check.commands.rule import rule
 
 main = typer.Typer(add_completion=False)
 
@@ -33,5 +34,5 @@ def callback(
     raise typer.Exit
 
 
-register_check(main)
-register_rule(main)
+main.command("check", cls=CHECK_COMMAND_CLASS)(check)
+main.command("rule")(rule)
