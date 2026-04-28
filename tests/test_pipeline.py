@@ -58,6 +58,124 @@ def test_detects_single_return_function_with_cross_file_usages(
     assert result.flags.trivial_wrapper_sloc_lines_by_file
 
 
+def test_single_return_functions_returning_constants_are_not_trivial_wrappers(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Constant-return functions are not removable wrapper findings."""
+    source_file = _write_source(
+        tmp_path,
+        "sample.py",
+        """
+        STATUS = "ready"
+
+        def status():
+            return STATUS
+
+        def literal_status():
+            return "ready"
+        """,
+    )
+
+    monkeypatch.setattr(
+        "scb_check.pipeline.run_sg", lambda files, rules_path: (),
+    )
+
+    result = analyze_files((source_file,))
+
+    assert result.flags.trivial_wrappers == ()
+    assert result.flags.trivial_wrapper_sloc_lines_by_file == ()
+
+
+def test_single_return_functions_calling_external_functions_are_not_trivial_wrappers(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """External call adapters are not project wrappers we can safely remove."""
+    source_file = _write_source(
+        tmp_path,
+        "sample.py",
+        """
+        import json
+
+        def parse_payload(value):
+            return json.loads(value)
+        """,
+    )
+
+    monkeypatch.setattr(
+        "scb_check.pipeline.run_sg", lambda files, rules_path: (),
+    )
+
+    result = analyze_files((source_file,))
+
+    assert result.flags.trivial_wrappers == ()
+    assert result.flags.trivial_wrapper_sloc_lines_by_file == ()
+
+
+def test_required_api_single_return_methods_are_not_trivial_wrappers(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Properties and inherited API implementations are required surfaces."""
+    source_file = _write_source(
+        tmp_path,
+        "sample.py",
+        """
+        class Resource:
+            @property
+            def identifier(self):
+                return self._identifier
+
+        class JsonEncoder(BaseEncoder):
+            def default(self, value):
+                return encode_value(value)
+        """,
+    )
+
+    monkeypatch.setattr(
+        "scb_check.pipeline.run_sg", lambda files, rules_path: (),
+    )
+
+    result = analyze_files((source_file,))
+
+    assert result.flags.trivial_wrappers == ()
+    assert result.flags.trivial_wrapper_sloc_lines_by_file == ()
+
+
+def test_detects_project_function_passthrough_wrapper(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Pass-through calls to scanned functions are removable wrappers."""
+    source_file = _write_source(
+        tmp_path,
+        "sample.py",
+        """
+        def normalize(value):
+            if value:
+                return value.strip()
+            return ""
+
+        def clean(value):
+            return normalize(value)
+        """,
+    )
+
+    monkeypatch.setattr(
+        "scb_check.pipeline.run_sg", lambda files, rules_path: (),
+    )
+
+    result = analyze_files((source_file,))
+
+    wrapper = next(
+        finding
+        for finding in result.flags.trivial_wrappers
+        if finding.name == "clean"
+    )
+    assert wrapper.kind == "single_return_function"
+
+
 def test_detects_function_alias_with_cross_file_usages(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

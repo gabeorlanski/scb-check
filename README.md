@@ -145,7 +145,7 @@ Rules:
 - **Parsing**: tree-sitter-python.
 - **Clone detection**: hashed AST blocks across the scanned set; two or more matching instances become a `CloneBlock`.
 - **Slop patterns**: ast-grep rules in `src/scb_check/resources/slop_rules/` split by category (e.g. `range(len(x))`, `dict.get(k, None)`, `isinstance` ladders, manual min/max, defensive guards).
-- **Trivial wrappers**: tree-sitter detects functions whose only executable body statement is `return ...`, plus aliases to functions defined in scanned files. Findings include resolved usage locations within the scanned files.
+- **Trivial wrappers**: tree-sitter detects removable pass-through functions (identity returns and calls that only forward parameters to another scanned function), plus aliases to functions defined in scanned files. Single-return detection skips constant returns, external calls, decorated functions, dunder methods, and inherited API implementations. Findings include resolved usage locations within the scanned files.
 - **Extra local slop patterns**: set `SCB_CHECK_EXTRA_SLOP_RULES` to a `:`-separated list of YAML paths to layer additional rules on top of the bundled set.
 - **Complexity**: per-function cyclomatic and cognitive complexity plus SLOC, combined into mass scores for erosion metrics.
 

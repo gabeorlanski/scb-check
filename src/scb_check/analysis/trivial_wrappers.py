@@ -7,6 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from scb_check.analysis.syntax import arguments_from_node
 from scb_check.analysis.syntax import call_name
 from scb_check.analysis.syntax import call_target
 from scb_check.analysis.syntax import executable_body_statements
@@ -28,6 +29,7 @@ TRIVIAL_WRAPPER_RULE_ID = "trivial-wrapper"
 _FUNCTION_ALIAS_KIND = "function_alias"
 _SINGLE_RETURN_KIND = "single_return_function"
 _ALIAS_ASSIGNMENT_PARTS = 2
+_RECEIVER_PARAMETER_NAMES = frozenset({"self", "cls"})
 _SKIP_USAGE_ANCESTOR_TYPES = frozenset(
     {
         "import_statement",
@@ -38,7 +40,7 @@ _SKIP_USAGE_ANCESTOR_TYPES = frozenset(
 
 
 @dataclass(frozen=True, slots=True)
-class _AliasContext:
+class _FileContext:
     module: str
     file_path: Path
     imports: dict[str, str]
@@ -66,6 +68,9 @@ def detect_trivial_wrappers(
     function_wrappers = _single_return_function_wrappers(
         parsed_files,
         module_by_file,
+        imports_by_file,
+        function_names_by_file,
+        function_qnames,
     )
     aliases = _function_aliases(
         parsed_files,
@@ -128,46 +133,235 @@ def _function_names_by_file(
     return names_by_file
 
 
+def _file_context(
+    file_path: Path,
+    module_by_file: dict[Path, str],
+    imports_by_file: dict[Path, dict[str, str]],
+    function_names_by_file: dict[Path, dict[str, str]],
+    function_qnames: frozenset[str],
+) -> _FileContext:
+    return _FileContext(
+        module=module_by_file[file_path],
+        file_path=file_path,
+        imports=imports_by_file[file_path],
+        definitions=function_names_by_file.get(  # scbc ignore[dict-get-empty-dict-default]
+            file_path,
+            {},
+        ),
+        function_qnames=function_qnames,
+    )
+
+
 def _single_return_function_wrappers(
     parsed_files: tuple[tuple[Path, str, Tree], ...],
     module_by_file: dict[Path, str],
+    imports_by_file: dict[Path, dict[str, str]],
+    function_names_by_file: dict[Path, dict[str, str]],
+    function_qnames: frozenset[str],
 ) -> tuple[TrivialWrapper, ...]:
     wrappers: list[TrivialWrapper] = []
     for file_path, _, tree in parsed_files:
-        module = module_by_file[file_path]
+        context = _file_context(
+            file_path,
+            module_by_file,
+            imports_by_file,
+            function_names_by_file,
+            function_qnames,
+        )
         wrappers.extend(
             wrapper
             for node in iter_nodes(tree.root_node)
-            if (wrapper := _single_return_wrapper(node, file_path, module))
-            is not None
+            if (wrapper := _single_return_wrapper(node, context)) is not None
         )
     return tuple(wrappers)
 
 
 def _single_return_wrapper(
     node: Node,
-    file_path: Path,
-    module: str,
+    context: _FileContext,
 ) -> TrivialWrapper | None:
-    wrapper = None
+    if node.type != "function_definition":
+        return None
+
     name = name_from_node(node)
-    executable_statements = executable_body_statements(node)
-    is_single_return = (
-        len(executable_statements) == 1
-        and executable_statements[0].type == "return_statement"
+    if name is None:
+        return None
+
+    expression = _single_return_expression(node)
+    if expression is None:
+        return None
+
+    if not _is_removable_single_return(node, name, expression, context):
+        return None
+
+    return TrivialWrapper(
+        file=context.file_path,
+        start_line=node.start_point[0] + 1,
+        end_line=node.end_point[0] + 1,
+        col=node.start_point[1],
+        end_col=node.end_point[1],
+        name=name,
+        qualified_name=f"{context.module}.{name}",
+        kind=_SINGLE_RETURN_KIND,
     )
-    if node.type == "function_definition" and name is not None and is_single_return:
-        wrapper = TrivialWrapper(
-            file=file_path,
-            start_line=node.start_point[0] + 1,
-            end_line=node.end_point[0] + 1,
-            col=node.start_point[1],
-            end_col=node.end_point[1],
-            name=name,
-            qualified_name=f"{module}.{name}",
-            kind=_SINGLE_RETURN_KIND,
-        )
-    return wrapper
+
+
+def _single_return_expression(node: Node) -> Node | None:
+    executable_statements = executable_body_statements(node)
+    if len(executable_statements) != 1:
+        return None
+
+    statement = executable_statements[0]
+    if statement.type != "return_statement" or len(statement.named_children) != 1:
+        return None
+    return statement.named_children[0]
+
+
+def _is_removable_single_return(
+    node: Node,
+    name: str,
+    expression: Node,
+    context: _FileContext,
+) -> bool:
+    method_class = _method_class(node)
+    if _is_required_api_function(node, name, method_class):
+        return False
+
+    parameter_names = _forwardable_parameter_names(node, method_class)
+    return _returns_forwarded_parameter(
+        expression,
+        parameter_names,
+    ) or _returns_passthrough_project_call(
+        expression,
+        parameter_names,
+        name,
+        context,
+    )
+
+
+def _is_required_api_function(
+    node: Node,
+    name: str,
+    method_class: Node | None,
+) -> bool:
+    # Decorators and inherited methods are often framework or parent-class API
+    # surfaces; a pass-through body does not mean the function can be removed.
+    return (
+        (node.parent is not None and node.parent.type == "decorated_definition")
+        or _is_dunder_name(name)
+        or (method_class is not None and _class_has_explicit_base(method_class))
+    )
+
+
+def _is_dunder_name(name: str) -> bool:
+    return name.startswith("__") and name.endswith("__")
+
+
+def _forwardable_parameter_names(
+    node: Node,
+    method_class: Node | None,
+) -> frozenset[str]:
+    parameter_names = frozenset(arguments_from_node(node))
+    if method_class is None:
+        return parameter_names
+    return parameter_names - _RECEIVER_PARAMETER_NAMES
+
+
+def _returns_forwarded_parameter(
+    expression: Node,
+    parameter_names: frozenset[str],
+) -> bool:
+    return expression.type == "identifier" and text(expression) in parameter_names
+
+
+def _returns_passthrough_project_call(
+    expression: Node,
+    parameter_names: frozenset[str],
+    name: str,
+    context: _FileContext,
+) -> bool:
+    if expression.type != "call" or not parameter_names:
+        return False
+
+    raw_callee = call_name(expression)
+    if raw_callee is None:
+        return False
+
+    resolved_callee = _resolve_reference(
+        raw_callee,
+        context.imports,
+        context.definitions,
+    )
+    if (
+        resolved_callee not in context.function_qnames
+        or resolved_callee == f"{context.module}.{name}"
+    ):
+        return False
+
+    argument_names = _passthrough_argument_names(expression)
+    return (
+        argument_names is not None
+        and len(argument_names) == len(parameter_names)
+        and frozenset(argument_names) == parameter_names
+    )
+
+
+def _passthrough_argument_names(call: Node) -> tuple[str, ...] | None:
+    argument_list = next(
+        (child for child in call.children if child.type == "argument_list"),
+        None,
+    )
+    if argument_list is None:
+        return ()
+
+    names: list[str] = []
+    for child in argument_list.named_children:
+        name = _passthrough_argument_name(child)
+        if name is None:
+            return None
+        names.append(name)
+    return tuple(names)
+
+
+def _passthrough_argument_name(node: Node) -> str | None:
+    name = None
+    if node.type == "identifier":
+        name = text(node)
+    elif node.type in {"list_splat", "dictionary_splat"}:
+        name = _single_identifier_child_text(node)
+    elif node.type == "keyword_argument" and node.named_children:
+        value = node.named_children[-1]
+        if value.type == "identifier":
+            name = text(value)
+    return name
+
+
+def _single_identifier_child_text(node: Node) -> str | None:
+    child = next(
+        (child for child in node.named_children if child.type == "identifier"),
+        None,
+    )
+    return text(child) if child is not None else None
+
+
+def _method_class(node: Node) -> Node | None:
+    current = node.parent
+    method_class = None
+    while current is not None and method_class is None:
+        if current.type == "function_definition":
+            break
+        if current.type == "class_definition":
+            method_class = current
+        current = current.parent
+    return method_class
+
+
+def _class_has_explicit_base(node: Node) -> bool:
+    argument_list = next(
+        (child for child in node.children if child.type == "argument_list"),
+        None,
+    )
+    return argument_list is not None and bool(argument_list.named_children)
 
 
 def _function_aliases(
@@ -179,15 +373,12 @@ def _function_aliases(
 ) -> tuple[TrivialWrapper, ...]:
     aliases: list[TrivialWrapper] = []
     for file_path, _, tree in parsed_files:
-        context = _AliasContext(
-            module=module_by_file[file_path],
-            file_path=file_path,
-            imports=imports_by_file[file_path],
-            definitions=function_names_by_file.get(  # scbc ignore[dict-get-empty-dict-default]
-                file_path,
-                {},
-            ),
-            function_qnames=function_qnames,
+        context = _file_context(
+            file_path,
+            module_by_file,
+            imports_by_file,
+            function_names_by_file,
+            function_qnames,
         )
         for statement in tree.root_node.children:
             alias = _alias_from_statement(statement, context)
@@ -198,7 +389,7 @@ def _function_aliases(
 
 def _alias_from_statement(
     statement: Node,
-    context: _AliasContext,
+    context: _FileContext,
 ) -> TrivialWrapper | None:
     alias = None
     assignment = _assignment_from_statement(statement)

@@ -1,6 +1,6 @@
 # `analysis/` — source → findings
 
-Parses Python source and extracts structural findings. Tree-sitter based, with stdlib-tokenizer modules for SLOC accounting ([`loc.py`](loc.py)) and ast-grep ignore directives ([`ignores.py`](ignores.py)). Function extraction uses a simple tree visitor in [`symbols.py`](symbols.py) to emit Pydantic [`ParsedSymbol`](../models.py) IR objects. [`trivial_wrappers.py`](trivial_wrappers.py) detects single-return functions and function aliases using shared tree-sitter helpers from [`syntax.py`](syntax.py). Consumed by [`../pipeline.py`](../pipeline.py).
+Parses Python source and extracts structural findings. Tree-sitter based, with stdlib-tokenizer modules for SLOC accounting ([`loc.py`](loc.py)) and ast-grep ignore directives ([`ignores.py`](ignores.py)). Function extraction uses a simple tree visitor in [`symbols.py`](symbols.py) to emit Pydantic [`ParsedSymbol`](../models.py) IR objects. [`trivial_wrappers.py`](trivial_wrappers.py) detects removable single-return pass-through functions and function aliases using shared tree-sitter helpers from [`syntax.py`](syntax.py). Pass-through calls must forward parameters to scanned functions. Consumed by [`../pipeline.py`](../pipeline.py).
 
 ## Invariants
 
@@ -18,7 +18,7 @@ These drive the verbosity/erosion numbers — change with care:
 - `_hash_ast_subtree` / `_normalize_ast` — identifier and literal normalization.
 - `CYC_COMPLEXITY_NODE_TYPES` and cognitive-complexity flow-break sets in [`symbols.py`](symbols.py) — which nodes count toward complexity.
 - SLOC exclusion rules in [`loc.py`](loc.py).
-- Trivial-wrapper definition in [`trivial_wrappers.py`](trivial_wrappers.py): single executable `return` functions and aliases to scanned functions.
+- Trivial-wrapper definition in [`trivial_wrappers.py`](trivial_wrappers.py): removable single-return pass-through functions and aliases to scanned functions, excluding constant returns, external calls, and required API surfaces such as decorators, dunder methods, and inherited methods.
 
 ## ast-grep boundary
 
