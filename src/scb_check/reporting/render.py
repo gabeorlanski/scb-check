@@ -15,6 +15,7 @@ def render_flags(
     source_lines_by_file: dict[Path, tuple[str, ...]],
     *,
     context_lines: int = 1,
+    min_duplicate_lines: int | None = None,
 ) -> str:
     """Render `flags` with surrounding source controlled by `context_lines`."""
     rendered: list[tuple[tuple[str, int, int], str]] = []
@@ -24,6 +25,12 @@ def render_flags(
 
     for group in _group_clones(flags.clones):
         anchor = group[0]
+        if not _passes_min_duplicate_lines(
+            anchor,
+            clone_sloc_lines_by_file,
+            min_duplicate_lines,
+        ):
+            continue
         key = (_display_path(anchor.file), anchor.start_line, 0)
         rendered.append(
             (
@@ -163,6 +170,17 @@ def _clone_body_lines(
         f"{clone.start_line + offset:>{line_number_width}} │ {text}"
         for offset, text in enumerate(clone.first_lines)
     ]
+
+
+def _passes_min_duplicate_lines(
+    clone: CloneBlock,
+    clone_sloc_lines_by_file: dict[Path, frozenset[int]],
+    min_duplicate_lines: int | None,
+) -> bool:
+    return (
+        min_duplicate_lines is None
+        or _clone_line_count(clone, clone_sloc_lines_by_file) >= min_duplicate_lines
+    )
 
 
 def _clone_line_count(

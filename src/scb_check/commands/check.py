@@ -28,6 +28,7 @@ _FlagValue = Literal[False, True]
 _OUTPUT_FORMAT_KEY = "scb_check_output_format"
 _REPORT_KEY = "scb_check_report"
 _DUPLICATES_ONLY_KEY = "scb_check_duplicates_only"
+_MIN_DUPLICATE_LINES_KEY = "scb_check_min_duplicate_lines"
 _OUTPUT_FORMATS: dict[str, _OutputFormat] = {
     "human": "human",
     "json": "json",
@@ -86,6 +87,13 @@ def _check_options() -> list[click.Option]:
             callback=_store_flag(_DUPLICATES_ONLY_KEY),
             help="Only emit duplicate-structure findings.",
         ),
+        click.Option(
+            ["--min-duplicate-lines"],
+            type=click.IntRange(min=1),
+            expose_value=False,
+            callback=_store_min_duplicate_lines,
+            help="Only emit duplicate groups with at least N duplicated SLOC lines.",
+        ),
     ]
 
 
@@ -100,6 +108,15 @@ def _store_output_format(
         return
     if value in _OUTPUT_FORMATS:
         ctx.meta[_OUTPUT_FORMAT_KEY] = value
+
+
+def _store_min_duplicate_lines(
+    ctx: click.Context,
+    _param: click.Parameter,
+    value: int | None,
+) -> None:
+    if value is not None:
+        ctx.meta[_MIN_DUPLICATE_LINES_KEY] = value
 
 
 def _store_flag(
@@ -137,6 +154,11 @@ def _resolve_output(ctx: typer.Context) -> tuple[_OutputFormat, bool]:
 def _explicit_output_format(ctx: typer.Context) -> _OutputFormat | None:
     value = ctx.meta.get(_OUTPUT_FORMAT_KEY)
     return _OUTPUT_FORMATS.get(value) if isinstance(value, str) else None
+
+
+def _min_duplicate_lines(ctx: typer.Context) -> int | None:
+    value = ctx.meta.get(_MIN_DUPLICATE_LINES_KEY)
+    return value if isinstance(value, int) else None
 
 
 CHECK_COMMAND_CLASS = _CheckCommand
@@ -200,10 +222,19 @@ def check(
             high_cc_functions=(),
             high_cog_functions=(),
         )
-    output = render_flags(
-        flags,
-        result.source_lines_by_file,
-        context_lines=config.context_lines,
-    )
+    min_duplicate_lines = _min_duplicate_lines(ctx)
+    if min_duplicate_lines is None:
+        output = render_flags(
+            flags,
+            result.source_lines_by_file,
+            context_lines=config.context_lines,
+        )
+    else:
+        output = render_flags(
+            flags,
+            result.source_lines_by_file,
+            context_lines=config.context_lines,
+            min_duplicate_lines=min_duplicate_lines,
+        )
     if output:
         typer.echo(output)

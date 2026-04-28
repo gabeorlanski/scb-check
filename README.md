@@ -53,6 +53,7 @@ scb-check check PATH -vv                # add debug logging
 scb-check check PATH --config FILE      # explicit config path
 scb-check check PATH --include-all      # include ignored and boundary-suppressed ast-grep findings
 scb-check check PATH --duplicates-only  # show only duplicate-structure findings
+scb-check check PATH --min-duplicate-lines N  # show duplicate groups with at least N SLOC lines
 scb-check rule RULE_ID                  # print YAML for a specific ast-grep rule
 ```
 

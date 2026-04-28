@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 from scb_check.cli import main
 from scb_check.config import Config
 from scb_check.models import AstGrepHit
+from scb_check.models import CloneBlock
 from scb_check.models import Flags
 from scb_check.pipeline import AnalysisResult
 from scb_check.pipeline import IgnoreDirectiveError
@@ -204,6 +205,131 @@ def test_check_rejects_report_with_duplicates_only(
     assert "--report" in output
     assert "--duplicates-only" in output
     assert "cannot be used together" in output
+
+
+def test_check_filters_duplicates_by_line_count(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The duplicate line filter hides smaller duplicate groups."""
+    source_dir = tmp_path / "project"
+    source_dir.mkdir()
+    source_file = source_dir / "sample.py"
+    source_file.write_text(
+        "\n".join(
+            [
+                "def small_first(value):",
+                "    current = value + 1",
+                "    return current",
+                "",
+                "def small_second(value):",
+                "    current = value + 2",
+                "    return current",
+                "",
+                "def large_first(value):",
+                "    current = value + 1",
+                "    doubled = current * 2",
+                "    tripled = doubled * 3",
+                "    return tripled",
+                "",
+                "def large_second(value):",
+                "    current = value + 2",
+                "    doubled = current * 2",
+                "    tripled = doubled * 3",
+                "    return tripled",
+            ],
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    resolved = source_file.resolve()
+    small_a = CloneBlock(
+        file=resolved,
+        start_line=1,
+        end_line=3,
+        group_hash="small",
+        instance_count=2,
+        other_instances=((resolved, 5),),
+        first_lines=(
+            "def small_first(value):",
+            "    current = value + 1",
+            "    return current",
+        ),
+    )
+    small_b = CloneBlock(
+        file=resolved,
+        start_line=5,
+        end_line=7,
+        group_hash="small",
+        instance_count=2,
+        other_instances=((resolved, 1),),
+        first_lines=(
+            "def small_second(value):",
+            "    current = value + 2",
+            "    return current",
+        ),
+    )
+    large_a = CloneBlock(
+        file=resolved,
+        start_line=9,
+        end_line=13,
+        group_hash="large",
+        instance_count=2,
+        other_instances=((resolved, 15),),
+        first_lines=(
+            "def large_first(value):",
+            "    current = value + 1",
+            "    doubled = current * 2",
+        ),
+    )
+    large_b = CloneBlock(
+        file=resolved,
+        start_line=15,
+        end_line=19,
+        group_hash="large",
+        instance_count=2,
+        other_instances=((resolved, 9),),
+        first_lines=(
+            "def large_second(value):",
+            "    current = value + 2",
+            "    doubled = current * 2",
+        ),
+    )
+
+    def fake_analyze(
+        path: Path,
+        _config: Config,
+        *,
+        include_all: bool = False,
+    ) -> AnalysisResult:
+        assert path == source_dir
+        assert not include_all
+        return AnalysisResult(
+            flags=Flags.from_parts(
+                clones=[small_a, small_b, large_a, large_b],
+                total_loc_by_file=[(resolved, 16)],
+                clone_sloc_lines_by_file=[
+                    (resolved, {1, 2, 3, 5, 6, 7, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19}),
+                ],
+            ),
+            source_lines_by_file={
+                resolved: tuple(source_file.read_text(encoding="utf-8").splitlines()),
+            },
+        )
+
+    monkeypatch.setattr("scb_check.commands.check.analyze", fake_analyze)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        ["check", "--min-duplicate-lines", "5", str(source_dir)],
+    )
+
+    assert result.exit_code == 0
+    assert "def large_first" in result.stdout
+    assert "def large_second" in result.stdout
+    assert "def small_first" not in result.stdout
+    assert "def small_second" not in result.stdout
 
 
 def test_check_rejects_json_output_with_duplicates_only(
