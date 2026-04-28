@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from scb_check.analysis.parse import ParseError
 from scb_check.analysis.parse import parse_source
-from scb_check.analysis.strings import string_prefix
+from scb_check.analysis.syntax import is_plain_string_expression_statement
 
 if TYPE_CHECKING:
     from tree_sitter import Node
@@ -63,8 +63,8 @@ def _string_ranges(root: Node, source_lines: list[str]) -> tuple[tuple[int, int]
     while stack:
         node = stack.pop()
         if (
-            node.type == "expression_statement"
-            and (literal := _string_literal(node)) is not None
+            is_plain_string_expression_statement(node)
+            and (literal := node.named_children[0]) is not None
             and _owns_line(literal, source_lines)
         ):
             ranges.append(
@@ -79,19 +79,6 @@ def _string_ranges(root: Node, source_lines: list[str]) -> tuple[tuple[int, int]
     return tuple(ranges)
 
 
-def _string_literal(statement: Node) -> Node | None:
-    if statement.type != "expression_statement":
-        return None
-    if len(statement.named_children) != 1:
-        return None
-
-    expression = statement.named_children[0]
-    if expression.type == "string" and _is_plain_string_node(expression):
-        return expression
-
-    return None  # scbc ignore[redundant-return-none]
-
-
 def _owns_line(
     literal: Node,
     source_lines: list[str],
@@ -104,12 +91,3 @@ def _owns_line(
     end_line = source_lines[end_row] if end_row < len(source_lines) else ""
 
     return not start_line[:start_col].strip() and not end_line[end_col:].strip()
-
-
-def _is_plain_string_node(node: Node) -> bool:
-    text = node.text
-    if text is None:
-        return False
-
-    prefix = string_prefix(text.decode("utf-8"))
-    return "b" not in prefix and "f" not in prefix

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections import Counter
 from pathlib import Path
 from textwrap import dedent
 
@@ -108,7 +107,10 @@ def test_builds_symbol_ir(tmp_path: Path) -> None:
         "agruments": symbol.agruments,
         "arguments": symbol.arguments,
         "returns": symbol.returns,
-        "calls": symbol.calls,
+        "usages": tuple(
+            (usage.line, usage.col, usage.name, usage.resolved_name, usage.kind)
+            for usage in symbol.usages
+        ),
     } == {
         "name": "route",
         "file": source_path,
@@ -122,12 +124,10 @@ def test_builds_symbol_ir(tmp_path: Path) -> None:
         "agruments": {"value": "int", "fallback": None},
         "arguments": {"value": "int", "fallback": None},
         "returns": "str",
-        "calls": Counter(
-            {
-                "package.tools.make": 1,
-                "os.path.join": 1,
-                "package.tools.Widget": 1,
-            },
+        "usages": (
+            (6, 15, "mk", "package.tools.make", "call"),
+            (7, 11, "os.path.join", "os.path.join", "call"),
+            (7, 36, "Widget", "package.tools.Widget", "call"),
         ),
     }
 

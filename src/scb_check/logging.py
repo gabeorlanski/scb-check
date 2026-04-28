@@ -47,4 +47,5 @@ def configure_logging(verbosity: int) -> None:
 
 def get_logger(name: str) -> FilteringBoundLogger:
     """Return a typed `structlog` logger for `name`."""
-    return cast("FilteringBoundLogger", structlog.get_logger(name))
+    logger = structlog.get_logger(name)
+    return cast("FilteringBoundLogger", logger)

@@ -44,28 +44,20 @@ def walk_python_files(path: Path, config: Config) -> Iterator[Path]:
 
 def _walk_directory(root: Path, config: Config) -> Iterator[Path]:
     for child in root.iterdir():
-        if _should_descend(child):
+        if (
+            not child.is_symlink()
+            and child.is_dir()
+            and child.name not in DEFAULT_EXCLUDED_DIRS
+        ):
             yield from _walk_directory(child, config)
             continue
 
-        if _is_included_python_file(child, config):
+        if (
+            not child.is_symlink()
+            and child.suffix == ".py"
+            and not _is_user_excluded(child, config)
+        ):
             yield child.resolve()
-
-
-def _should_descend(path: Path) -> bool:
-    return (
-        not path.is_symlink()
-        and path.is_dir()
-        and path.name not in DEFAULT_EXCLUDED_DIRS
-    )
-
-
-def _is_included_python_file(path: Path, config: Config) -> bool:
-    return (
-        not path.is_symlink()
-        and path.suffix == ".py"
-        and not _is_user_excluded(path, config)
-    )
 
 
 def _is_user_excluded(path: Path, config: Config) -> bool:

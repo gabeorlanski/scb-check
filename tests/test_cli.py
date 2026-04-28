@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Never
 
-import click
 import yaml
 from typer.testing import CliRunner
 
@@ -29,6 +28,8 @@ _REPORT_KEYS = {
     "verbosity_flagged_loc",
     "clone_loc",
     "ast_grep_flagged_loc",
+    "trivial_wrapper_loc",
+    "trivial_wrappers",
     "total_functions",
     "high_cc_functions",
     "high_cog_functions",
@@ -150,18 +151,19 @@ def test_check_human_findings(
     )
 
 
-def test_check_duplicates_only(
+def test_check_disable_sg_shows_non_sg_findings(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """The structural duplicate mode suppresses other finding types."""
+    """Disabling sg skips ast-grep while keeping structural and erosion findings."""
     corpus = Path(__file__).parent / "fixtures" / "corpus"
     config_override = tmp_path / "scb-check.toml"
     config_override.write_text("", encoding="utf-8")
-    monkeypatch.setattr(
-        "scb_check.pipeline.run_sg",
-        _fake_chained_dict_get_hit,
-    )
+
+    def fail_run_sg(_files: tuple[Path, ...], _rules_path: Path) -> tuple[AstGrepHit, ...]:
+        raise AssertionError("sg should not run")
+
+    monkeypatch.setattr("scb_check.pipeline.run_sg", fail_run_sg)
 
     runner = CliRunner()
     result = runner.invoke(
@@ -170,41 +172,41 @@ def test_check_duplicates_only(
             "check",
             "--config",
             str(config_override),
-            "--duplicates-only",
+            "--disable-sg",
             str(corpus),
         ],
     )
 
     assert result.exit_code == 0
     assert "duplicate-structure:" in result.stdout
+    assert "trivial-wrapper[" in result.stdout
     assert "warning[chained-dict-get]" not in result.stdout
-    assert "erosion:" not in result.stdout
-    assert "cog_erosion:" not in result.stdout
+    assert "erosion:" in result.stdout
+    assert "cog_erosion:" in result.stdout
 
 
-def test_check_rejects_report_with_duplicates_only(
+def test_check_report_allows_disable_sg(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Report and duplicate-only output modes are mutually exclusive."""
+    """JSON reports can disable sg because it is an analysis option."""
     source = tmp_path / "sample.py"
     source.write_text("x = 1\n", encoding="utf-8")
-    monkeypatch.setattr(
-        "scb_check.pipeline.run_sg",
-        lambda _files, _rules_path: (),
-    )
+
+    def fail_run_sg(_files: tuple[Path, ...], _rules_path: Path) -> tuple[AstGrepHit, ...]:
+        raise AssertionError("sg should not run")
+
+    monkeypatch.setattr("scb_check.pipeline.run_sg", fail_run_sg)
 
     runner = CliRunner()
     result = runner.invoke(
         main,
-        ["check", "--report", "--duplicates-only", str(source)],
+        ["check", "--report", "--disable-sg", str(source)],
     )
 
-    output = click.unstyle(result.output)
-    assert result.exit_code == 2
-    assert "--report" in output
-    assert "--duplicates-only" in output
-    assert "cannot be used together" in output
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["ast_grep_flagged_loc"] == 0
 
 
 def test_check_filters_duplicates_by_line_count(
@@ -301,9 +303,11 @@ def test_check_filters_duplicates_by_line_count(
         _config: Config,
         *,
         include_all: bool = False,
+        disable_sg: bool = False,
     ) -> AnalysisResult:
         assert path == source_dir
         assert not include_all
+        assert not disable_sg
         return AnalysisResult(
             flags=Flags.from_parts(
                 clones=[small_a, small_b, large_a, large_b],
@@ -330,32 +334,6 @@ def test_check_filters_duplicates_by_line_count(
     assert "def large_second" in result.stdout
     assert "def small_first" not in result.stdout
     assert "def small_second" not in result.stdout
-
-
-def test_check_rejects_json_output_with_duplicates_only(
-    tmp_path: Path,
-) -> None:
-    """JSON output cannot be combined with duplicate-only human filtering."""
-    source = tmp_path / "sample.py"
-    source.write_text("x = 1\n", encoding="utf-8")
-
-    runner = CliRunner()
-    result = runner.invoke(
-        main,
-        [
-            "check",
-            "--output-format",
-            "json",
-            "--duplicates-only",
-            str(source),
-        ],
-    )
-
-    output = click.unstyle(result.output)
-    assert result.exit_code == 2
-    assert "--output-format json" in output
-    assert "--duplicates-only" in output
-    assert "cannot be used together" in output
 
 
 def test_check_missing_path() -> None:
@@ -476,11 +454,13 @@ def test_check_passes_context(
         config: Config,
         *,
         include_all: bool = False,
+        disable_sg: bool = False,
     ) -> AnalysisResult:
         del config
         resolved = source_file.resolve()
         assert path == source_dir
         assert include_all is False
+        assert disable_sg is False
         return AnalysisResult(
             flags=Flags.from_parts(total_loc_by_file=[(resolved, 1)]),
             source_lines_by_file={resolved: ("x = 1",)},
@@ -529,11 +509,13 @@ def test_check_verbosity_sets_logging(
         config: Config,
         *,
         include_all: bool = False,
+        disable_sg: bool = False,
     ) -> AnalysisResult:
         del config
         resolved = source_file.resolve()
         assert path == source_dir
         assert include_all is False
+        assert disable_sg is False
         return AnalysisResult(
             flags=Flags.from_parts(total_loc_by_file=[(resolved, 1)]),
             source_lines_by_file={resolved: ("x = 1",)},
@@ -591,11 +573,13 @@ def test_check_include_all(
         config: Config,
         *,
         include_all: bool = False,
+        disable_sg: bool = False,
     ) -> AnalysisResult:
         del config
         resolved = source_file.resolve()
         assert path == source_dir
         assert include_all is True
+        assert disable_sg is False
         return AnalysisResult(
             flags=Flags.from_parts(total_loc_by_file=[(resolved, 1)]),
             source_lines_by_file={resolved: ("x = 1",)},
@@ -622,8 +606,9 @@ def test_check_reports_ignore_errors(
         config: Config,
         *,
         include_all: bool = False,
+        disable_sg: bool = False,
     ) -> Never:
-        del path, config, include_all
+        del path, config, include_all, disable_sg
         raise IgnoreDirectiveError(
             "sample.py:12: scbc ignore requires at least one rule id",
         )

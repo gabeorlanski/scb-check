@@ -20,6 +20,8 @@ from scb_check.analysis.loc import sloc_line_numbers
 from scb_check.analysis.parse import ParseError
 from scb_check.analysis.parse import parse_file
 from scb_check.analysis.symbols import extract_functions
+from scb_check.analysis.trivial_wrappers import TRIVIAL_WRAPPER_RULE_ID
+from scb_check.analysis.trivial_wrappers import detect_trivial_wrappers
 from scb_check.config import Config
 from scb_check.logging import get_logger
 from scb_check.models import AstGrepHit
@@ -27,6 +29,7 @@ from scb_check.models import CloneBlock
 from scb_check.models import FileLineSet
 from scb_check.models import Flags
 from scb_check.models import ParsedSymbol
+from scb_check.models import TrivialWrapper
 from scb_check.resources import load_thresholds
 from scb_check.resources import rules_file
 from scb_check.walker import walk_python_files
@@ -50,6 +53,7 @@ class AnalysisResult:
 class Findings:
     clones: tuple[CloneBlock, ...]
     ast_hits: tuple[AstGrepHit, ...]
+    trivial_wrappers: tuple[TrivialWrapper, ...]
     functions: tuple[ParsedSymbol, ...]
     total_loc_by_file: tuple[tuple[Path, int], ...]
     sloc_lines_by_file: dict[Path, frozenset[int]]
@@ -61,28 +65,28 @@ def analyze(
     config: Config,
     *,
     include_all: bool = False,
+    disable_sg: bool = False,
 ) -> AnalysisResult:
     """Analyze Python files under `path` using `config`."""
     files = tuple(sorted(walk_python_files(path, config)))
     if not files:
         raise FileNotFoundError(f"no Python files found at {path}")
-    return analyze_files(files, include_all=include_all)
+    return analyze_files(files, include_all=include_all, disable_sg=disable_sg)
 
 
 def analyze_files(
     files: tuple[Path, ...],
     *,
     include_all: bool = False,
+    disable_sg: bool = False,
 ) -> AnalysisResult:
     """Analyze an explicit tuple of Python `files`."""
-    findings = _collect_findings(files, include_all=include_all)
-    flags = _build_flags(
-        clones=findings.clones,
-        ast_hits=findings.ast_hits,
-        functions=findings.functions,
-        total_loc_by_file=findings.total_loc_by_file,
-        sloc_lines_by_file=findings.sloc_lines_by_file,
+    findings = _collect_findings(
+        files,
+        include_all=include_all,
+        disable_sg=disable_sg,
     )
+    flags = _build_flags(findings)
     return AnalysisResult(
         flags=flags,
         source_lines_by_file=findings.source_lines_by_file,
@@ -93,6 +97,7 @@ def _collect_findings(
     files: tuple[Path, ...],
     *,
     include_all: bool,
+    disable_sg: bool,
 ) -> Findings:
     functions: list[ParsedSymbol] = []
     total_loc_by_file: list[tuple[Path, int]] = []
@@ -120,15 +125,22 @@ def _collect_findings(
         total_loc_by_file.append((file_path, len(sloc_lines)))
         functions.extend(extract_functions(file_path, tree, sloc_lines))
 
+    trivial_wrappers = detect_trivial_wrappers(
+        tuple(parsed_files),
+        tuple(functions),
+    )
+
     with rules_file() as rules_path:
-        ast_hits = run_sg(tuple(source_lines_by_file), rules_path)
-        thresholds = load_thresholds(rules_path)
+        ast_hits = () if disable_sg else run_sg(tuple(source_lines_by_file), rules_path)
+        thresholds = {} if disable_sg else load_thresholds(rules_path)
         if include_all:
             filtered_ast_hits = ast_hits
+            filtered_trivial_wrappers = trivial_wrappers
         else:
             ignore_directives = parse_ignore_directives(
                 source_by_file,
                 rules_path,
+                extra_rule_ids=frozenset({TRIVIAL_WRAPPER_RULE_ID}),
             )
             boundary_directives = parse_boundary_directives(source_by_file)
             boundary_ranges = _boundary_function_ranges(
@@ -137,6 +149,10 @@ def _collect_findings(
             )
             filtered_ast_hits = _filter_ignored_ast_hits(
                 ast_hits,
+                ignore_directives,
+            )
+            filtered_trivial_wrappers = _filter_ignored_trivial_wrappers(
+                trivial_wrappers,
                 ignore_directives,
             )
             filtered_ast_hits = _filter_boundary_ast_hits(
@@ -150,6 +166,7 @@ def _collect_findings(
     return Findings(
         clones=detect_clones(tuple(parsed_files)),
         ast_hits=filtered_ast_hits,
+        trivial_wrappers=filtered_trivial_wrappers,
         functions=tuple(functions),
         total_loc_by_file=tuple(total_loc_by_file),
         sloc_lines_by_file=sloc_lines_by_file,
@@ -195,6 +212,7 @@ def _containing_function(
     )
 
 
+# scbc ignore[trivial-wrapper] Names boundary filtering for the pipeline.
 def _filter_boundary_ast_hits(
     ast_hits: tuple[AstGrepHit, ...],
     boundary_ranges: tuple[tuple[Path, int, int], ...],
@@ -244,15 +262,25 @@ def _filter_ignored_ast_hits(
     )
 
 
-def _build_flags(
-    clones: tuple[CloneBlock, ...],
-    ast_hits: tuple[AstGrepHit, ...],
-    functions: tuple[ParsedSymbol, ...],
-    total_loc_by_file: tuple[tuple[Path, int], ...],
-    sloc_lines_by_file: dict[Path, frozenset[int]],
-) -> Flags:
+def _filter_ignored_trivial_wrappers(
+    wrappers: tuple[TrivialWrapper, ...],
+    ignore_directives: tuple[IgnoreDirective, ...],
+) -> tuple[TrivialWrapper, ...]:
+    ignored = {
+        (directive.file, directive.target_line)
+        for directive in ignore_directives
+        if TRIVIAL_WRAPPER_RULE_ID in directive.rule_ids
+    }
+    return tuple(
+        wrapper
+        for wrapper in wrappers
+        if (wrapper.file, wrapper.start_line) not in ignored
+    )
+
+
+def _build_flags(findings: Findings) -> Flags:
     sorted_clones = sorted(
-        clones,
+        findings.clones,
         key=lambda clone: (
             clone.file.as_posix(),
             clone.start_line,
@@ -260,7 +288,7 @@ def _build_flags(
         ),
     )
     sorted_ast_hits = sorted(
-        ast_hits,
+        findings.ast_hits,
         key=lambda hit: (
             hit.file.as_posix(),
             hit.line,
@@ -268,8 +296,17 @@ def _build_flags(
             hit.rule_id,
         ),
     )
+    sorted_trivial_wrappers = sorted(
+        findings.trivial_wrappers,
+        key=lambda wrapper: (
+            wrapper.file.as_posix(),
+            wrapper.start_line,
+            wrapper.col,
+            wrapper.name,
+        ),
+    )
     sorted_functions = sorted(
-        functions,
+        findings.functions,
         key=lambda symbol: (
             symbol.file.as_posix(),
             symbol.start_line,
@@ -281,27 +318,34 @@ def _build_flags(
 
     clone_sloc_lines = _collect_sloc_lines(
         sorted_clones,
-        sloc_lines_by_file,
+        findings.sloc_lines_by_file,
         lambda clone: (clone.file, clone.start_line, clone.end_line),
     )
     ast_sloc_lines = _collect_sloc_lines(
         sorted_ast_hits,
-        sloc_lines_by_file,
+        findings.sloc_lines_by_file,
         lambda hit: (hit.file, hit.line, hit.end_line),
+    )
+    trivial_wrapper_sloc_lines = _collect_sloc_lines(
+        sorted_trivial_wrappers,
+        findings.sloc_lines_by_file,
+        lambda wrapper: (wrapper.file, wrapper.start_line, wrapper.end_line),
     )
 
     return Flags.from_parts(
         clones=sorted_clones,
         ast_grep_hits=sorted_ast_hits,
+        trivial_wrappers=sorted_trivial_wrappers,
         high_cc_functions=high_cc,
         high_cog_functions=high_cog,
         total_loc_by_file=sorted(
-            total_loc_by_file,
+            findings.total_loc_by_file,
             key=lambda item: item[0].as_posix(),
         ),
         all_functions=sorted_functions,
         clone_sloc_lines_by_file=clone_sloc_lines,
         ast_sloc_lines_by_file=ast_sloc_lines,
+        trivial_wrapper_sloc_lines_by_file=trivial_wrapper_sloc_lines,
     )
 
 

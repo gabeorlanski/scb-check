@@ -16,6 +16,7 @@ class _VerbosityCounts:
     flagged_loc: int
     clone_loc: int
     ast_loc: int
+    trivial_wrapper_loc: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +42,8 @@ def compute_report(flags: Flags) -> Report:
         verbosity_flagged_loc=verbosity.flagged_loc,
         clone_loc=verbosity.clone_loc,
         ast_grep_flagged_loc=verbosity.ast_loc,
+        trivial_wrapper_loc=verbosity.trivial_wrapper_loc,
+        trivial_wrappers=len(flags.trivial_wrappers),
         total_functions=len(flags.all_functions),
         high_cc_functions=len(flags.high_cc_functions),
         high_cog_functions=len(flags.high_cog_functions),
@@ -58,6 +61,7 @@ def _verbosity_counts(flags: Flags, total_loc: int) -> _VerbosityCounts:
             flagged_loc=0,
             clone_loc=0,
             ast_loc=0,
+            trivial_wrapper_loc=0,
         )
 
     clone_lines_by_file = {
@@ -66,12 +70,23 @@ def _verbosity_counts(flags: Flags, total_loc: int) -> _VerbosityCounts:
     ast_lines_by_file = {
         entry.file: entry.lines for entry in flags.ast_sloc_lines_by_file
     }
-    flagged_loc = _count_union_lines(clone_lines_by_file, ast_lines_by_file)
+    trivial_wrapper_lines_by_file = {
+        entry.file: entry.lines
+        for entry in flags.trivial_wrapper_sloc_lines_by_file
+    }
+    flagged_loc = _count_union_lines(
+        clone_lines_by_file,
+        ast_lines_by_file,
+        trivial_wrapper_lines_by_file,
+    )
     return _VerbosityCounts(
         verbosity=flagged_loc / total_loc,
         flagged_loc=flagged_loc,
         clone_loc=sum(len(lines) for lines in clone_lines_by_file.values()),
         ast_loc=sum(len(lines) for lines in ast_lines_by_file.values()),
+        trivial_wrapper_loc=sum(
+            len(lines) for lines in trivial_wrapper_lines_by_file.values()
+        ),
     )
 
 
@@ -80,24 +95,33 @@ def _mass_share(
     flagged_functions: tuple[ParsedSymbol, ...],
     kind: str,
 ) -> _MassShare:
-    total = sum(_mass(symbol, kind) for symbol in all_functions)
-    flagged = sum(_mass(symbol, kind) for symbol in flagged_functions)
+    if kind == "cc":
+        total = sum(symbol.cc_mass() for symbol in all_functions)
+        flagged = sum(symbol.cc_mass() for symbol in flagged_functions)
+    else:
+        total = sum(symbol.cog_mass() for symbol in all_functions)
+        flagged = sum(symbol.cog_mass() for symbol in flagged_functions)
     score = flagged / total if total else 0.0
     return _MassShare(score=score, total=total, flagged=flagged)
-
-
-def _mass(symbol: ParsedSymbol, kind: str) -> float:
-    return symbol.cc_mass() if kind == "cc" else symbol.cog_mass()
 
 
 def _count_union_lines(
     clone_lines_by_file: dict[Path, frozenset[int]],
     ast_lines_by_file: dict[Path, frozenset[int]],
+    trivial_wrapper_lines_by_file: dict[Path, frozenset[int]],
 ) -> int:
     total = 0
-    all_paths = set(clone_lines_by_file) | set(ast_lines_by_file)
+    all_paths = (
+        set(clone_lines_by_file)
+        | set(ast_lines_by_file)
+        | set(trivial_wrapper_lines_by_file)
+    )
     for path in all_paths:
         clone_lines = clone_lines_by_file.get(path, frozenset())
         ast_lines = ast_lines_by_file.get(path, frozenset())
-        total += len(clone_lines | ast_lines)
+        trivial_wrapper_lines = trivial_wrapper_lines_by_file.get(
+            path,
+            frozenset(),
+        )
+        total += len(clone_lines | ast_lines | trivial_wrapper_lines)
     return total

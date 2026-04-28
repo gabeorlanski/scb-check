@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import math
-from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel
 from pydantic import ConfigDict
@@ -43,8 +43,40 @@ class AstGrepHit:
     message: str = ""
 
 
+@dataclass(frozen=True, slots=True)
+class SymbolUsage:
+    """A resolved symbol usage location in scanned source."""
+
+    file: Path
+    line: int
+    col: int
+    name: str
+    resolved_name: str | None
+    kind: Literal["call", "reference"]
+
+
+@dataclass(frozen=True, slots=True)
+class TrivialWrapper:
+    """A trivial wrapper or alias with resolved usage locations."""
+
+    file: Path
+    start_line: int
+    end_line: int
+    col: int
+    end_col: int
+    name: str
+    qualified_name: str
+    kind: Literal["single_return_function", "function_alias"]
+    usages: tuple[SymbolUsage, ...] = field(default_factory=tuple)
+
+    @property
+    def usage_count(self) -> int:  # scbc ignore[trivial-wrapper] Public convenience property.
+        """Return the number of resolved usages."""
+        return len(self.usages)
+
+
 class ParsedSymbol(BaseModel):
-    """A parsed function-like symbol with complexity and call metadata."""
+    """A parsed function-like symbol with complexity and usage metadata."""
 
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
@@ -59,36 +91,36 @@ class ParsedSymbol(BaseModel):
     cog_complexity: int
     agruments: dict[str, str | None] = Field(default_factory=dict)
     returns: str | None = None
-    calls: Counter[str] = Field(default_factory=Counter)
+    usages: tuple[SymbolUsage, ...] = Field(default_factory=tuple)
 
     @property
-    def arguments(self) -> dict[str, str | None]:
+    def arguments(self) -> dict[str, str | None]:  # scbc ignore[trivial-wrapper] Compatibility alias for misspelled field.
         """Return parsed argument annotations."""
         return self.agruments
 
     @property
-    def start_line(self) -> int:
+    def start_line(self) -> int:  # scbc ignore[trivial-wrapper] Public convenience property.
         """Return the 1-indexed starting line."""
         return self.start[0]
 
     @property
-    def end_line(self) -> int:
+    def end_line(self) -> int:  # scbc ignore[trivial-wrapper] Public convenience property.
         """Return the 1-indexed ending line."""
         return self.end[0]
 
-    def cc_mass(self) -> float:
+    def cc_mass(self) -> float:  # scbc ignore[trivial-wrapper] Public metric helper.
         """Return the cyclomatic complexity mass."""
         return self.cyc_complexity * math.sqrt(self.sloc)
 
-    def cog_mass(self) -> float:
+    def cog_mass(self) -> float:  # scbc ignore[trivial-wrapper] Public metric helper.
         """Return the cognitive complexity mass."""
         return self.cog_complexity * math.sqrt(self.sloc)
 
-    def is_high_cc(self) -> bool:
+    def is_high_cc(self) -> bool:  # scbc ignore[trivial-wrapper] Public metric predicate.
         """Return True if the function is high cyclomatic complexity."""
         return self.cyc_complexity > HIGH_COMPLEXITY_THRESHOLD
 
-    def is_high_cog(self) -> bool:
+    def is_high_cog(self) -> bool:  # scbc ignore[trivial-wrapper] Public metric predicate.
         """Return True if the function is high cognitive complexity."""
         return self.cog_complexity > HIGH_COMPLEXITY_THRESHOLD
 
@@ -101,7 +133,7 @@ class FileLineSet:
     lines: frozenset[int]
 
     @classmethod
-    def from_parts(cls, file: Path, lines: Iterable[int]) -> FileLineSet:
+    def from_parts(cls, file: Path, lines: Iterable[int]) -> FileLineSet:  # scbc ignore[trivial-wrapper] Public coercing constructor.
         """Build a `FileLineSet` from any iterable of line numbers."""
         return cls(file=file, lines=frozenset(lines))
 
@@ -112,6 +144,7 @@ class Flags:
 
     clones: tuple[CloneBlock, ...] = field(default_factory=tuple)
     ast_grep_hits: tuple[AstGrepHit, ...] = field(default_factory=tuple)
+    trivial_wrappers: tuple[TrivialWrapper, ...] = field(default_factory=tuple)
     high_cc_functions: tuple[ParsedSymbol, ...] = field(default_factory=tuple)
     high_cog_functions: tuple[ParsedSymbol, ...] = field(default_factory=tuple)
     total_loc_by_file: tuple[tuple[Path, int], ...] = field(
@@ -124,6 +157,9 @@ class Flags:
     ast_sloc_lines_by_file: tuple[FileLineSet, ...] = field(
         default_factory=tuple,
     )
+    trivial_wrapper_sloc_lines_by_file: tuple[FileLineSet, ...] = field(
+        default_factory=tuple,
+    )
 
     @classmethod
     def from_parts(  # noqa: PLR0913
@@ -131,6 +167,7 @@ class Flags:
         *,
         clones: Iterable[CloneBlock] = (),
         ast_grep_hits: Iterable[AstGrepHit] = (),
+        trivial_wrappers: Iterable[TrivialWrapper] = (),
         high_cc_functions: Iterable[ParsedSymbol] = (),
         high_cog_functions: Iterable[ParsedSymbol] = (),
         total_loc_by_file: Iterable[tuple[Path, int]] = (),
@@ -141,21 +178,27 @@ class Flags:
         ast_sloc_lines_by_file: Iterable[
             FileLineSet | tuple[Path, Iterable[int]]
         ] = (),
+        trivial_wrapper_sloc_lines_by_file: Iterable[
+            FileLineSet | tuple[Path, Iterable[int]]
+        ] = (),
     ) -> Flags:
         """Build `Flags` while coercing iterable inputs to tuple fields."""
+        clone_lines = _coerce_file_line_sets(clone_sloc_lines_by_file)
+        ast_lines = _coerce_file_line_sets(ast_sloc_lines_by_file)
+        trivial_wrapper_lines = _coerce_file_line_sets(
+            trivial_wrapper_sloc_lines_by_file,
+        )
         return cls(
             clones=tuple(clones),
             ast_grep_hits=tuple(ast_grep_hits),
+            trivial_wrappers=tuple(trivial_wrappers),
             high_cc_functions=tuple(high_cc_functions),
             high_cog_functions=tuple(high_cog_functions),
             total_loc_by_file=tuple(total_loc_by_file),
             all_functions=tuple(all_functions),
-            clone_sloc_lines_by_file=_coerce_file_line_sets(
-                clone_sloc_lines_by_file,
-            ),
-            ast_sloc_lines_by_file=_coerce_file_line_sets(
-                ast_sloc_lines_by_file,
-            ),
+            clone_sloc_lines_by_file=clone_lines,
+            ast_sloc_lines_by_file=ast_lines,
+            trivial_wrapper_sloc_lines_by_file=trivial_wrapper_lines,
         )
 
 
@@ -171,6 +214,8 @@ class Report:
     verbosity_flagged_loc: int
     clone_loc: int
     ast_grep_flagged_loc: int
+    trivial_wrapper_loc: int
+    trivial_wrappers: int
     total_functions: int
     high_cc_functions: int
     high_cog_functions: int
@@ -180,6 +225,7 @@ class Report:
     high_cog_mass: float
 
 
+# scbc ignore[trivial-wrapper] Names shared coercion for each line-set field.
 def _coerce_file_line_sets(
     values: Iterable[FileLineSet | tuple[Path, Iterable[int]]],
 ) -> tuple[FileLineSet, ...]:

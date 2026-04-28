@@ -8,6 +8,9 @@ from scb_check.models import AstGrepHit
 from scb_check.models import CloneBlock
 from scb_check.models import Flags
 from scb_check.models import ParsedSymbol
+from scb_check.models import TrivialWrapper
+
+_RenderedFlag = tuple[tuple[str, int, int], str]
 
 
 def render_flags(
@@ -18,66 +21,138 @@ def render_flags(
     min_duplicate_lines: int | None = None,
 ) -> str:
     """Render `flags` with surrounding source controlled by `context_lines`."""
-    rendered: list[tuple[tuple[str, int, int], str]] = []
-    clone_sloc_lines_by_file = {
-        entry.file: entry.lines for entry in flags.clone_sloc_lines_by_file
-    }
-
-    for group in _group_clones(flags.clones):
-        anchor = group[0]
-        if not _passes_min_duplicate_lines(
-            anchor,
-            clone_sloc_lines_by_file,
-            min_duplicate_lines,
-        ):
-            continue
-        key = (_display_path(anchor.file), anchor.start_line, 0)
-        rendered.append(
-            (
-                key,
-                _render_clone_group(
-                    group,
-                    source_lines_by_file,
-                    clone_sloc_lines_by_file,
-                ),
-            ),
-        )
-
-    for hit in _ordered_ast_grep_hits(flags.ast_grep_hits):
-        key = (_display_path(hit.file), hit.line, 1)
-        rendered.append(
-            (
-                key,
-                _render_ast_grep(
-                    hit,
-                    source_lines_by_file,
-                    context_lines,
-                ),
-            ),
-        )
-
-    for symbols, kind_rank, renderer in (
-        (flags.high_cc_functions, 2, _render_erosion),
-        (flags.high_cog_functions, 3, _render_cog_erosion),
-    ):
-        for symbol in symbols:
-            key = (_display_path(symbol.file), symbol.start_line, kind_rank)
-            rendered.append(
-                (
-                    key,
-                    renderer(
-                        symbol,
-                        source_lines_by_file,
-                        context_lines,
-                    ),
-                ),
-            )
+    rendered = [
+        *_clone_entries(flags, source_lines_by_file, min_duplicate_lines),
+        *_ast_grep_entries(flags, source_lines_by_file, context_lines),
+        *_trivial_wrapper_entries(flags, source_lines_by_file, context_lines),
+        *_complexity_entries(flags, source_lines_by_file, context_lines),
+    ]
 
     if not rendered:
         return ""
 
     rendered.sort(key=lambda item: item[0])
     return "\n\n".join(text for _, text in rendered)
+
+
+def _clone_entries(
+    flags: Flags,
+    source_lines_by_file: dict[Path, tuple[str, ...]],
+    min_duplicate_lines: int | None,
+) -> list[_RenderedFlag]:
+    entries: list[_RenderedFlag] = []
+    clone_sloc_lines_by_file = {
+        entry.file: entry.lines for entry in flags.clone_sloc_lines_by_file
+    }
+    for group in _group_clones(flags.clones):
+        anchor = group[0]
+        if (
+            min_duplicate_lines is not None
+            and _clone_line_count(anchor, clone_sloc_lines_by_file)
+            < min_duplicate_lines
+        ):
+            continue
+        key = (_display_path(anchor.file), anchor.start_line, 0)
+        text = _render_clone_group(
+            group,
+            source_lines_by_file,
+            clone_sloc_lines_by_file,
+        )
+        entries.append((key, text))
+    return entries
+
+
+def _ast_grep_entries(
+    flags: Flags,
+    source_lines_by_file: dict[Path, tuple[str, ...]],
+    context_lines: int,
+) -> list[_RenderedFlag]:
+    entries: list[_RenderedFlag] = []
+    ordered_ast_hits = dict.fromkeys(
+        sorted(
+            flags.ast_grep_hits,
+            key=lambda hit: (
+                hit.file.as_posix(),
+                hit.line,
+                hit.col,
+                hit.end_line,
+                hit.end_col,
+                hit.rule_id,
+                hit.message,
+                hit.matched_text,
+            ),
+        ),
+    )
+    for hit in ordered_ast_hits:
+        key = (_display_path(hit.file), hit.line, 1)
+        text = _render_ast_grep(hit, source_lines_by_file, context_lines)
+        entries.append((key, text))
+    return entries
+
+
+def _trivial_wrapper_entries(
+    flags: Flags,
+    source_lines_by_file: dict[Path, tuple[str, ...]],
+    context_lines: int,
+) -> list[_RenderedFlag]:
+    entries: list[_RenderedFlag] = []
+    for wrapper in flags.trivial_wrappers:
+        key = (_display_path(wrapper.file), wrapper.start_line, 2)
+        text = _render_trivial_wrapper(
+            wrapper,
+            source_lines_by_file,
+            context_lines,
+        )
+        entries.append((key, text))
+    return entries
+
+
+def _complexity_entries(
+    flags: Flags,
+    source_lines_by_file: dict[Path, tuple[str, ...]],
+    context_lines: int,
+) -> list[_RenderedFlag]:
+    entries: list[_RenderedFlag] = []
+    complexity_groups = (
+        (
+            flags.high_cc_functions,
+            3,
+            "erosion",
+            "complexity",
+            "cyc_complexity",
+            "complexity > 10",
+        ),
+        (
+            flags.high_cog_functions,
+            4,
+            "cog_erosion",
+            "cognitive complexity",
+            "cog_complexity",
+            "cognitive complexity > 10",
+        ),
+    )
+    for symbols, kind_rank, title_prefix, value_label, attr_name, threshold in (
+        complexity_groups
+    ):
+        for symbol in symbols:
+            key = (_display_path(symbol.file), symbol.start_line, kind_rank)
+            complexity_value = getattr(symbol, attr_name)
+            text = _render_complexity_warning(
+                symbol,
+                source_lines_by_file,
+                context_lines,
+                title=(
+                    f"{title_prefix}: function `{symbol.name}` "
+                    f"exceeds {value_label} threshold"
+                ),
+                detail=(
+                    f"{value_label}: {complexity_value}, "
+                    f"sloc: {symbol.sloc} "
+                    f"(threshold: {threshold})"
+                ),
+            )
+            entries.append((key, text))
+    return entries
 
 
 def _group_clones(
@@ -98,26 +173,6 @@ def _group_clones(
     )
 
 
-def _make_clone_body_lines(
-    clone: CloneBlock,
-    source_lines_by_file: dict[Path, tuple[str, ...]],
-    clone_sloc_lines_by_file: dict[Path, frozenset[int]],
-    line_number_width: int,
-    pad: str,
-) -> list[str]:
-    return [
-        f"{pad} ┌─ {_display_path(clone.file)}:{clone.start_line}",
-        f"{pad} │",
-        *_clone_body_lines(
-            clone,
-            source_lines_by_file,
-            clone_sloc_lines_by_file,
-            line_number_width,
-        ),
-        f"{pad} │",
-    ]
-
-
 def _render_clone_group(
     instances: tuple[CloneBlock, ...],
     source_lines_by_file: dict[Path, tuple[str, ...]],
@@ -136,15 +191,19 @@ def _render_clone_group(
     ]
 
     for index, clone in enumerate(instances):
+        lines.extend([f"{pad} ┆"] if index else [])
         lines.extend(
-            ([f"{pad} ┆"] if index else [])
-            + _make_clone_body_lines(
-                clone,
-                source_lines_by_file,
-                clone_sloc_lines_by_file,
-                line_number_width,
-                pad,
-            ),
+            [
+                f"{pad} ┌─ {_display_path(clone.file)}:{clone.start_line}",
+                f"{pad} │",
+                *_clone_body_lines(
+                    clone,
+                    source_lines_by_file,
+                    clone_sloc_lines_by_file,
+                    line_number_width,
+                ),
+                f"{pad} │",
+            ],
         )
     return "\n".join(lines)
 
@@ -170,17 +229,6 @@ def _clone_body_lines(
         f"{clone.start_line + offset:>{line_number_width}} │ {text}"
         for offset, text in enumerate(clone.first_lines)
     ]
-
-
-def _passes_min_duplicate_lines(
-    clone: CloneBlock,
-    clone_sloc_lines_by_file: dict[Path, frozenset[int]],
-    min_duplicate_lines: int | None,
-) -> bool:
-    return (
-        min_duplicate_lines is None
-        or _clone_line_count(clone, clone_sloc_lines_by_file) >= min_duplicate_lines
-    )
 
 
 def _clone_line_count(
@@ -249,67 +297,51 @@ def _render_ast_grep(
     return "\n".join(lines)
 
 
-def _ordered_ast_grep_hits(
-    ast_hits: tuple[AstGrepHit, ...],
-) -> tuple[AstGrepHit, ...]:
-    return tuple(
-        dict.fromkeys(
-            sorted(
-                ast_hits,
-                key=lambda hit: (
-                    hit.file.as_posix(),
-                    hit.line,
-                    hit.col,
-                    hit.end_line,
-                    hit.end_col,
-                    hit.rule_id,
-                    hit.message,
-                    hit.matched_text,
-                ),
-            ),
-        ),
-    )
-
-
-def _render_erosion(
-    symbol: ParsedSymbol,
+def _render_trivial_wrapper(
+    wrapper: TrivialWrapper,
     source_lines_by_file: dict[Path, tuple[str, ...]],
     context_lines: int,
 ) -> str:
-    return _render_complexity_warning(
-        symbol,
-        source_lines_by_file,
+    source_lines = source_lines_by_file.get(wrapper.file, ())
+    rendered_lines = _source_line_range(
+        source_lines,
+        wrapper.start_line,
+        wrapper.end_line,
         context_lines,
-        title=(
-            f"erosion: function `{symbol.name}` "
-            "exceeds complexity threshold"
-        ),
-        detail=(
-            f"complexity: {symbol.cyc_complexity}, sloc: {symbol.sloc} "
-            "(threshold: complexity > 10)"
-        ),
     )
+    line_number_width = len(str(max(rendered_lines.stop - 1, wrapper.end_line)))
+    kind_label = wrapper.kind.replace("_", "-")
+    lines = [
+        f"trivial-wrapper[{kind_label}]: `{wrapper.name}` adds no behavior",
+        f"{' ' * line_number_width} ┌─ {_display_path(wrapper.file)}:{wrapper.start_line}:{wrapper.col + 1}",
+        f"{' ' * line_number_width} │",
+    ]
+    lines.extend(
+        f"{line_number:>{line_number_width}} │ "
+        f"{_line_at(source_lines, line_number)}"
+        for line_number in rendered_lines
+    )
+    lines.extend(
+        [
+            f"{' ' * line_number_width} │",
+            f"{' ' * line_number_width} = resolved usages: {wrapper.usage_count}",
+        ],
+    )
+    lines.extend(_render_usage_lines(wrapper, line_number_width))
+    return "\n".join(lines)
 
 
-def _render_cog_erosion(
-    symbol: ParsedSymbol,
-    source_lines_by_file: dict[Path, tuple[str, ...]],
-    context_lines: int,
-) -> str:
-    return _render_complexity_warning(
-        symbol,
-        source_lines_by_file,
-        context_lines,
-        title=(
-            f"cog_erosion: function `{symbol.name}` "
-            "exceeds cognitive complexity threshold"
-        ),
-        detail=(
-            f"cognitive complexity: {symbol.cog_complexity}, "
-            f"sloc: {symbol.sloc} "
-            "(threshold: cognitive complexity > 10)"
-        ),
-    )
+def _render_usage_lines(
+    wrapper: TrivialWrapper,
+    line_number_width: int,
+) -> list[str]:
+    if not wrapper.usages:
+        return []
+    pad = " " * line_number_width
+    return [
+        f"{pad} = used at {_display_path(usage.file)}:{usage.line}:{usage.col + 1} ({usage.kind})"
+        for usage in wrapper.usages
+    ]
 
 
 def _render_complexity_warning(

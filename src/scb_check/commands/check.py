@@ -6,7 +6,6 @@ import json
 import sys
 from collections.abc import Callable
 from dataclasses import asdict
-from dataclasses import replace
 from pathlib import Path
 from typing import Annotated, Literal, TypedDict, Unpack
 
@@ -27,7 +26,7 @@ _OutputFormat = Literal["human", "json"]
 _FlagValue = Literal[False, True]
 _OUTPUT_FORMAT_KEY = "scb_check_output_format"
 _REPORT_KEY = "scb_check_report"
-_DUPLICATES_ONLY_KEY = "scb_check_duplicates_only"
+_DISABLE_SG_KEY = "scb_check_disable_sg"
 _MIN_DUPLICATE_LINES_KEY = "scb_check_min_duplicate_lines"
 _OUTPUT_FORMATS: dict[str, _OutputFormat] = {
     "human": "human",
@@ -58,43 +57,40 @@ class _CheckCommand(TyperCommand):
         **kwargs: Unpack[_TyperCommandKwargs],
     ) -> None:
         params = kwargs.get("params")
-        kwargs["params"] = [*_check_options(), *(params or [])]
+        command_options = [
+            click.Option(
+                ["--output-format"],
+                type=click.Choice(tuple(_OUTPUT_FORMATS)),
+                default="human",
+                show_default=True,
+                expose_value=False,
+                callback=_store_output_format,
+                help="Choose output format (default: human).",
+            ),
+            click.Option(
+                ["--report"],
+                is_flag=True,
+                expose_value=False,
+                callback=_store_flag(_REPORT_KEY),
+                help="Emit JSON report.",
+            ),
+            click.Option(
+                ["--disable-sg"],
+                is_flag=True,
+                expose_value=False,
+                callback=_store_flag(_DISABLE_SG_KEY),
+                help="Disable ast-grep subprocess analysis.",
+            ),
+            click.Option(
+                ["--min-duplicate-lines"],
+                type=click.IntRange(min=1),
+                expose_value=False,
+                callback=_store_min_duplicate_lines,
+                help="Only emit duplicate groups with at least N duplicated SLOC lines.",
+            ),
+        ]
+        kwargs["params"] = [*command_options, *(params or [])]
         super().__init__(name, **kwargs)
-
-
-def _check_options() -> list[click.Option]:
-    return [
-        click.Option(
-            ["--output-format"],
-            type=click.Choice(tuple(_OUTPUT_FORMATS)),
-            default="human",
-            show_default=True,
-            expose_value=False,
-            callback=_store_output_format,
-            help="Choose output format (default: human).",
-        ),
-        click.Option(
-            ["--report"],
-            is_flag=True,
-            expose_value=False,
-            callback=_store_flag(_REPORT_KEY),
-            help="Emit JSON report.",
-        ),
-        click.Option(
-            ["--duplicates-only"],
-            is_flag=True,
-            expose_value=False,
-            callback=_store_flag(_DUPLICATES_ONLY_KEY),
-            help="Only emit duplicate-structure findings.",
-        ),
-        click.Option(
-            ["--min-duplicate-lines"],
-            type=click.IntRange(min=1),
-            expose_value=False,
-            callback=_store_min_duplicate_lines,
-            help="Only emit duplicate groups with at least N duplicated SLOC lines.",
-        ),
-    ]
 
 
 def _store_output_format(
@@ -133,22 +129,14 @@ def _store_flag(
     return callback
 
 
-def _resolve_output(ctx: typer.Context) -> tuple[_OutputFormat, bool]:
+def _resolve_output(ctx: typer.Context) -> _OutputFormat:
     explicit_format = _explicit_output_format(ctx)
     report = bool(ctx.meta.get(_REPORT_KEY, False))
-    duplicates_only = bool(ctx.meta.get(_DUPLICATES_ONLY_KEY, False))
 
-    if report and duplicates_only:
-        raise ValueError("`--report` and `--duplicates-only` cannot be used together")
     if report and explicit_format == "human":
         raise ValueError("`--report` and `--output-format human` cannot be used together")
 
-    output_format: _OutputFormat = "json" if report else explicit_format or "human"
-    if output_format == "json" and duplicates_only:
-        raise ValueError(
-            "`--output-format json` and `--duplicates-only` cannot be used together",
-        )
-    return output_format, duplicates_only
+    return "json" if report else explicit_format or "human"
 
 
 def _explicit_output_format(ctx: typer.Context) -> _OutputFormat | None:
@@ -191,7 +179,7 @@ def check(
 ) -> None:
     """Run analysis for `path` and emit the selected output format."""
     try:
-        output_format, duplicates_only = _resolve_output(ctx)
+        output_format = _resolve_output(ctx)
     except ValueError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from exc
@@ -200,7 +188,12 @@ def check(
 
     try:
         config = load_config(config_path, Path.cwd())
-        result = analyze(path, config, include_all=include_all)
+        result = analyze(
+            path,
+            config,
+            include_all=include_all,
+            disable_sg=bool(ctx.meta.get(_DISABLE_SG_KEY, False)),
+        )
     except (ConfigError, IgnoreDirectiveError, OSError, ValueError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from exc
@@ -215,13 +208,6 @@ def check(
         return
 
     flags = result.flags
-    if duplicates_only:
-        flags = replace(
-            result.flags,
-            ast_grep_hits=(),
-            high_cc_functions=(),
-            high_cog_functions=(),
-        )
     min_duplicate_lines = _min_duplicate_lines(ctx)
     if min_duplicate_lines is None:
         output = render_flags(

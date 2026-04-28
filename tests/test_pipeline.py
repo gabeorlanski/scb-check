@@ -10,6 +10,150 @@ from scb_check.pipeline import IgnoreDirectiveError
 from scb_check.pipeline import analyze_files
 
 
+def test_detects_single_return_function_with_cross_file_usages(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Single-return functions are reported with resolved project usages."""
+    package = tmp_path / "pkg"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    source_file = _write_source(
+        package,
+        "api.py",
+        '''
+        def trivial(value):
+            """Legacy wrapper."""
+            return value
+        ''',
+    )
+    usage_file = _write_source(
+        package,
+        "consumer.py",
+        """
+        from pkg.api import trivial
+
+        RESULT = trivial(VALUE)
+        HANDLER = trivial
+        """,
+    )
+
+    monkeypatch.setattr(
+        "scb_check.pipeline.run_sg", lambda files, rules_path: (),
+    )
+
+    result = analyze_files((source_file, usage_file))
+
+    wrapper = next(
+        finding
+        for finding in result.flags.trivial_wrappers
+        if finding.name == "trivial"
+    )
+    assert wrapper.kind == "single_return_function"
+    assert wrapper.usage_count == 2
+    assert tuple((usage.file, usage.line, usage.kind) for usage in wrapper.usages) == (
+        (usage_file, 3, "call"),
+        (usage_file, 4, "reference"),
+    )
+    assert result.flags.trivial_wrapper_sloc_lines_by_file
+
+
+def test_detects_function_alias_with_cross_file_usages(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Aliases to scanned functions are reported as trivial wrappers."""
+    package = tmp_path / "pkg"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    source_file = _write_source(
+        package,
+        "api.py",
+        """
+        def real(value):
+            if value:
+                return value
+            return None
+
+        legacy = real
+        """,
+    )
+    usage_file = _write_source(
+        package,
+        "consumer.py",
+        """
+        from pkg.api import legacy
+
+        RESULT = legacy(VALUE)
+        """,
+    )
+
+    monkeypatch.setattr(
+        "scb_check.pipeline.run_sg", lambda files, rules_path: (),
+    )
+
+    result = analyze_files((source_file, usage_file))
+
+    alias = next(
+        finding
+        for finding in result.flags.trivial_wrappers
+        if finding.name == "legacy"
+    )
+    assert alias.kind == "function_alias"
+    assert alias.usage_count == 1
+    assert tuple((usage.file, usage.line, usage.kind) for usage in alias.usages) == (
+        (usage_file, 3, "call"),
+    )
+
+
+def test_ignore_suppresses_trivial_wrapper(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Ignore directives suppress tree-sitter trivial-wrapper findings."""
+    source_file = _write_source(
+        tmp_path,
+        "sample.py",
+        """
+        # scbc ignore[trivial-wrapper]
+        def trivial(value):
+            return value
+        """,
+    )
+
+    monkeypatch.setattr(
+        "scb_check.pipeline.run_sg", lambda files, rules_path: (),
+    )
+
+    result = analyze_files((source_file,))
+
+    assert result.flags.trivial_wrappers == ()
+    assert result.flags.trivial_wrapper_sloc_lines_by_file == ()
+
+
+def test_trivial_wrapper_ignore_is_valid_without_a_finding(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The tree-sitter trivial-wrapper rule id is valid for source ignores."""
+    source_file = _write_source(
+        tmp_path,
+        "sample.py",
+        """
+        # scbc ignore[trivial-wrapper]
+        VALUE = 1
+        """,
+    )
+
+    monkeypatch.setattr(
+        "scb_check.pipeline.run_sg", lambda files, rules_path: (),
+    )
+
+    result = analyze_files((source_file,))
+
+    assert result.flags.total_loc_by_file == ((source_file, 1),)
+
+
 def test_inline_ignore_suppresses_hit(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

@@ -33,6 +33,7 @@ NON_CODE_TOKEN_TYPES = frozenset(
     },
 )
 _TOKEN_ERROR_LOCATION_ARG = 2
+_STRUCTURAL_RULE_IDS = frozenset({"trivial-wrapper"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,9 +60,11 @@ class BoundaryDirective(NamedTuple):
 def parse_ignore_directives(
     source_by_file: dict[Path, str],
     rules_path: Path,
+    *,
+    extra_rule_ids: frozenset[str] = frozenset(),
 ) -> tuple[IgnoreDirective, ...]:
     """Return validated `scbc ignore[...]` directives from source files."""
-    valid_rule_ids = _load_valid_rule_ids(rules_path)
+    valid_rule_ids = _load_valid_rule_ids(rules_path) | _STRUCTURAL_RULE_IDS | extra_rule_ids
 
     directives: list[IgnoreDirective] = []
     errors: list[str] = []
@@ -129,10 +132,9 @@ def _parse_file_directives(
         scan = _scan_directives(source)
     except TokenError as exc:
         return (), (
-            _format_error(
-                file_path,
-                _token_error_line(exc),
-                f"failed to parse ignore directives: {exc}",
+            (
+                f"{file_path.as_posix()}:{_token_error_line(exc)}: "
+                f"failed to parse ignore directives: {exc}"
             ),
         )
 
@@ -155,11 +157,8 @@ def _parse_file_directives(
         )
         if target_line is None:
             errors.append(
-                _format_error(
-                    file_path,
-                    directive_line,
-                    "scbc ignore has no target code line",
-                ),
+                f"{file_path.as_posix()}:{directive_line}: "
+                "scbc ignore has no target code line",
             )
 
         if rule_errors or target_line is None:
@@ -190,10 +189,9 @@ def parse_boundary_directives(
             scan = _scan_directives(source)
         except TokenError as exc:
             errors.append(
-                _format_error(
-                    file_path,
-                    _token_error_line(exc),
-                    f"failed to parse boundary directives: {exc}",
+                (
+                    f"{file_path.as_posix()}:{_token_error_line(exc)}: "
+                    f"failed to parse boundary directives: {exc}"
                 ),
             )
             continue
@@ -278,11 +276,8 @@ def _validated_rule_ids(
     )
     if not parsed_rule_ids:
         return (), (
-            _format_error(
-                file_path,
-                line_no,
-                "scbc ignore requires at least one rule id",
-            ),
+            f"{file_path.as_posix()}:{line_no}: "
+            "scbc ignore requires at least one rule id",
         )
 
     errors = tuple(
@@ -314,7 +309,7 @@ def _rule_id_error(
         message = f"unknown ast-grep rule id: {rule_id}"
 
     return (
-        _format_error(file_path, line_no, message)
+        f"{file_path.as_posix()}:{line_no}: {message}"
         if message is not None
         else None
     )
@@ -326,7 +321,3 @@ def _token_error_line(exc: TokenError) -> int:
         if isinstance(line_no, int):
             return line_no
     return 1
-
-
-def _format_error(file_path: Path, line_no: int, message: str) -> str:
-    return f"{file_path.as_posix()}:{line_no}: {message}"

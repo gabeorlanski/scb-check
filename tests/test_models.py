@@ -13,6 +13,7 @@ def test_normalizes_file_line_sets() -> None:
     flags = Flags.from_parts(
         clone_sloc_lines_by_file=[(path, {1, 2})],
         ast_sloc_lines_by_file=[FileLineSet(path, frozenset({3}))],
+        trivial_wrapper_sloc_lines_by_file=[(path, {4})],
     )
 
     assert flags.clone_sloc_lines_by_file == (
@@ -20,6 +21,9 @@ def test_normalizes_file_line_sets() -> None:
     )
     assert flags.ast_sloc_lines_by_file == (
         FileLineSet(path, frozenset({3})),
+    )
+    assert flags.trivial_wrapper_sloc_lines_by_file == (
+        FileLineSet(path, frozenset({4})),
     )
 
 
@@ -29,4 +33,6 @@ def test_flags_default_empty_tuples() -> None:
 
     assert flags.clones == ()
     assert flags.ast_grep_hits == ()
+    assert flags.trivial_wrappers == ()
     assert flags.clone_sloc_lines_by_file == ()
+    assert flags.trivial_wrapper_sloc_lines_by_file == ()
