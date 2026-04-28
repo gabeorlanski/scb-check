@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Never
 
+import click
 import yaml
 from typer.testing import CliRunner
 
@@ -164,10 +165,11 @@ def test_check_rejects_report_with_duplicates_only(
         ["check", "--report", "--duplicates-only", str(source)],
     )
 
+    output = click.unstyle(result.output)
     assert result.exit_code == 2
-    assert "--report" in result.output
-    assert "--duplicates-only" in result.output
-    assert "cannot be used together" in result.output
+    assert "--report" in output
+    assert "--duplicates-only" in output
+    assert "cannot be used together" in output
 
 
 def test_check_missing_path() -> None:
