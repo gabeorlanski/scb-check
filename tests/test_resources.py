@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING, cast
 
 import yaml
 
+from scb_check.resources import find_rule_document
+from scb_check.resources import load_rule_ids
 from scb_check.resources import rule_texts
 from scb_check.resources import rules_file
 
@@ -49,6 +51,22 @@ def test_extra_rules_named(
 
     assert extra_rules.name in named_texts
     assert "id: env-extra-rule" in named_texts[extra_rules.name]
+
+
+def test_find_rule_document_returns_bundled_rule() -> None:
+    """Bundled rule documents are findable by ID."""
+    document = find_rule_document("chained-dict-get")
+
+    assert document is not None
+    assert document["id"] == "chained-dict-get"
+
+
+def test_load_rule_ids_reads_combined_yaml(tmp_path: Path) -> None:
+    """Rule IDs are loaded from a YAML rules file through resources."""
+    rules_path = tmp_path / "rules.yaml"
+    _write_rule_file(rules_path, "loaded-rule-id")
+
+    assert load_rule_ids(rules_path) == frozenset({"loaded-rule-id"})
 
 
 def test_extra_rules_combined(

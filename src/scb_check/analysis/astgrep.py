@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
+from typing import cast
 
 from scb_check.logging import get_logger
 from scb_check.models import AstGrepHit
+from scb_check.models import AstGrepSeverity
 
 logger = get_logger(__name__)
+
+_AST_GREP_BINARIES = ("ast-grep", "sg")
 
 
 def run_sg(files: tuple[Path, ...], rules_path: Path) -> tuple[AstGrepHit, ...]:
@@ -43,19 +49,39 @@ def _command(files: tuple[Path, ...], rules_path: Path) -> list[str] | None:
         )
         return None
 
-    sg_binary = shutil.which("sg")
-    if sg_binary is None:
-        logger.warning("ast-grep binary not found", binary="sg")
+    ast_grep_binary = _ast_grep_binary()
+    if ast_grep_binary is None:
+        logger.warning("ast-grep binary not found", binary="ast-grep")
         return None
 
     return [
-        sg_binary,
+        ast_grep_binary,
         "scan",
         "--json=stream",
         "-r",
         str(rules_path),
         *[str(path) for path in files],
     ]
+
+
+def _ast_grep_binary() -> str | None:
+    for binary in _AST_GREP_BINARIES:
+        if (candidate := _python_env_executable(binary)) is not None:
+            return str(candidate)
+
+    for binary in _AST_GREP_BINARIES:
+        if (candidate := shutil.which(binary)) is not None:
+            return candidate
+
+    return None
+
+
+def _python_env_executable(binary: str) -> Path | None:
+    candidate = Path(sys.executable).parent / binary
+    if candidate.is_file() and os.access(candidate, os.X_OK):
+        return candidate
+
+    return None
 
 
 def _run_command(command: list[str]) -> subprocess.CompletedProcess[str] | None:
@@ -115,7 +141,16 @@ def _parse_hit(line: str) -> AstGrepHit | None:
             rule_id=str(payload["ruleId"]),
             matched_text=str(payload["text"]),
             message=str(payload["message"]),
+            severity=_severity(payload.get("severity")),
         )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         logger.warning("failed to parse ast-grep output", error=str(exc))
         return None
+
+
+def _severity(value: object) -> AstGrepSeverity:
+    return (
+        cast("AstGrepSeverity", value)
+        if value in {"info", "warning", "critical"}
+        else "warning"
+    )

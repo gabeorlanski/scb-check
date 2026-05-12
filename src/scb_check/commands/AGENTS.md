@@ -7,7 +7,7 @@ errors to exit codes.
 ## Modules in this layer
 
 - [`check.py`](check.py) — wiring for `scb-check check`.
-- [`rule.py`](rule.py) — wiring for `scb-check rule <rule-id>`.
+- [`rule.py`](rule.py) — wiring for `scb-check rule <rule-id>` for ast-grep YAML and structural rule metadata.
 
 ## Rules
 

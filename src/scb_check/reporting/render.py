@@ -7,8 +7,8 @@ from pathlib import Path
 from scb_check.models import AstGrepHit
 from scb_check.models import CloneBlock
 from scb_check.models import Flags
-from scb_check.models import ParsedSymbol
-from scb_check.models import TrivialWrapper
+from scb_check.tree_walking.models import RuleFinding
+from scb_check.tree_walking.models import SymbolIR
 
 _RenderedFlag = tuple[tuple[str, int, int], str]
 
@@ -24,7 +24,7 @@ def render_flags(
     rendered = [
         *_clone_entries(flags, source_lines_by_file, min_duplicate_lines),
         *_ast_grep_entries(flags, source_lines_by_file, context_lines),
-        *_trivial_wrapper_entries(flags, source_lines_by_file, context_lines),
+        *_structural_entries(flags, source_lines_by_file, context_lines),
         *_complexity_entries(flags, source_lines_by_file, context_lines),
     ]
 
@@ -42,9 +42,9 @@ def _clone_entries(
 ) -> list[_RenderedFlag]:
     entries: list[_RenderedFlag] = []
     clone_sloc_lines_by_file = {
-        entry.file: entry.lines for entry in flags.clone_sloc_lines_by_file
+        entry.file: entry.lines for entry in flags.lines.clone_sloc_lines_by_file
     }
-    for group in _group_clones(flags.clones):
+    for group in _group_clones(flags.findings.clones):
         anchor = group[0]
         if (
             min_duplicate_lines is not None
@@ -70,7 +70,7 @@ def _ast_grep_entries(
     entries: list[_RenderedFlag] = []
     ordered_ast_hits = dict.fromkeys(
         sorted(
-            flags.ast_grep_hits,
+            flags.findings.ast_grep_hits,
             key=lambda hit: (
                 hit.file.as_posix(),
                 hit.line,
@@ -90,16 +90,16 @@ def _ast_grep_entries(
     return entries
 
 
-def _trivial_wrapper_entries(
+def _structural_entries(
     flags: Flags,
     source_lines_by_file: dict[Path, tuple[str, ...]],
     context_lines: int,
 ) -> list[_RenderedFlag]:
     entries: list[_RenderedFlag] = []
-    for wrapper in flags.trivial_wrappers:
-        key = (_display_path(wrapper.file), wrapper.start_line, 2)
-        text = _render_trivial_wrapper(
-            wrapper,
+    for finding in flags.findings.structural_findings:
+        key = (_display_path(finding.file), finding.start_line, 2)
+        text = _render_structural_finding(
+            finding,
             source_lines_by_file,
             context_lines,
         )
@@ -115,7 +115,7 @@ def _complexity_entries(
     entries: list[_RenderedFlag] = []
     complexity_groups = (
         (
-            flags.high_cc_functions,
+            flags.findings.high_cc_functions,
             3,
             "erosion",
             "complexity",
@@ -123,7 +123,7 @@ def _complexity_entries(
             "complexity > 10",
         ),
         (
-            flags.high_cog_functions,
+            flags.findings.high_cog_functions,
             4,
             "cog_erosion",
             "cognitive complexity",
@@ -262,90 +262,57 @@ def _render_ast_grep(
     source_lines_by_file: dict[Path, tuple[str, ...]],
     context_lines: int,
 ) -> str:
-    first_col = hit.col + 1
     message = hit.message.strip() or "matches slop pattern"
-
-    start_line = hit.line
-    end_line = max(hit.line, hit.end_line)
     source_lines = source_lines_by_file.get(hit.file, ())
     rendered_lines = _source_line_range(
         source_lines,
-        start_line,
-        end_line,
+        hit.line,
+        max(hit.line, hit.end_line),
         context_lines,
     )
-    line_number_width = len(str(max(rendered_lines.stop - 1, end_line)))
-
-    lines = [
-        f"warning[{hit.rule_id}]: {message}",
-        f"{' ' * line_number_width} ┌─ {_display_path(hit.file)}:{hit.line}:{first_col}",
-        f"{' ' * line_number_width} │",
-    ]
-    if source_lines:
-        lines.extend(
-            f"{line_number:>{line_number_width}} │ "
-            f"{_line_at(source_lines, line_number)}"
-            for line_number in rendered_lines
-        )
-    else:
-        matched_lines = hit.matched_text.splitlines() or [hit.matched_text]
-        for offset, text in enumerate(matched_lines):
-            line_number = start_line + offset
-            lines.append(f"{line_number:>{line_number_width}} │ {text}")
-
-    lines.append(f"{' ' * line_number_width} │")
-    return "\n".join(lines)
+    fallback_lines = tuple(
+        (hit.line + offset, text)
+        for offset, text in enumerate(hit.matched_text.splitlines() or [hit.matched_text])
+    )
+    return "\n".join(
+        [
+            f"{hit.severity}[{hit.rule_id}]: {message}",
+            *_render_source_block(
+                f"{_display_path(hit.file)}:{hit.line}:{hit.col + 1}",
+                source_lines,
+                rendered_lines,
+                fallback_lines=fallback_lines,
+            ),
+        ],
+    )
 
 
-def _render_trivial_wrapper(
-    wrapper: TrivialWrapper,
+def _render_structural_finding(
+    finding: RuleFinding,
     source_lines_by_file: dict[Path, tuple[str, ...]],
     context_lines: int,
 ) -> str:
-    source_lines = source_lines_by_file.get(wrapper.file, ())
+    source_lines = source_lines_by_file.get(finding.file, ())
     rendered_lines = _source_line_range(
         source_lines,
-        wrapper.start_line,
-        wrapper.end_line,
+        finding.start_line,
+        finding.end_line,
         context_lines,
     )
-    line_number_width = len(str(max(rendered_lines.stop - 1, wrapper.end_line)))
-    kind_label = wrapper.kind.replace("_", "-")
-    lines = [
-        f"trivial-wrapper[{kind_label}]: `{wrapper.name}` adds no behavior",
-        f"{' ' * line_number_width} ┌─ {_display_path(wrapper.file)}:{wrapper.start_line}:{wrapper.col + 1}",
-        f"{' ' * line_number_width} │",
-    ]
-    lines.extend(
-        f"{line_number:>{line_number_width}} │ "
-        f"{_line_at(source_lines, line_number)}"
-        for line_number in rendered_lines
-    )
-    lines.extend(
+    return "\n".join(
         [
-            f"{' ' * line_number_width} │",
-            f"{' ' * line_number_width} = resolved usages: {wrapper.usage_count}",
+            f"{finding.rule_id}[{finding.severity.value}]: {finding.message}",
+            *_render_source_block(
+                f"{_display_path(finding.file)}:{finding.start_line}:{finding.span.start_col + 1}",
+                source_lines,
+                rendered_lines,
+            ),
         ],
     )
-    lines.extend(_render_usage_lines(wrapper, line_number_width))
-    return "\n".join(lines)
-
-
-def _render_usage_lines(
-    wrapper: TrivialWrapper,
-    line_number_width: int,
-) -> list[str]:
-    if not wrapper.usages:
-        return []
-    pad = " " * line_number_width
-    return [
-        f"{pad} = used at {_display_path(usage.file)}:{usage.line}:{usage.col + 1} ({usage.kind})"
-        for usage in wrapper.usages
-    ]
 
 
 def _render_complexity_warning(
-    symbol: ParsedSymbol,
+    symbol: SymbolIR,
     source_lines_by_file: dict[Path, tuple[str, ...]],
     context_lines: int,
     *,
@@ -359,27 +326,47 @@ def _render_complexity_warning(
         symbol.start_line,
         context_lines,
     )
-    line_number_width = len(
-        str(max(rendered_lines.stop - 1, symbol.start_line))
-    )
-
-    lines = [
-        title,
-        f"{' ' * line_number_width} ┌─ {_display_path(symbol.file)}:{symbol.start_line}",
-        f"{' ' * line_number_width} │",
-    ]
-    lines.extend(
-        f"{line_number:>{line_number_width}} │ "
-        f"{_line_at(source_lines, line_number)}"
-        for line_number in rendered_lines
-    )
-    lines.extend(
+    return "\n".join(
         [
-            f"{' ' * line_number_width} │",
-            f"{' ' * line_number_width} = {detail}",
+            title,
+            *_render_source_block(
+                f"{_display_path(symbol.file)}:{symbol.start_line}",
+                source_lines,
+                rendered_lines,
+                detail=detail,
+            ),
         ],
     )
-    return "\n".join(lines)
+
+
+def _render_source_block(
+    location: str,
+    source_lines: tuple[str, ...],
+    rendered_lines: range,
+    *,
+    fallback_lines: tuple[tuple[int, str], ...] = (),
+    detail: str | None = None,
+) -> list[str]:
+    fallback_end = max((line for line, _ in fallback_lines), default=0)
+    line_number_width = len(str(max(rendered_lines.stop - 1, fallback_end)))
+    pad = " " * line_number_width
+    lines = [f"{pad} ┌─ {location}", f"{pad} │"]
+    if source_lines or not fallback_lines:
+        lines.extend(
+            f"{line_number:>{line_number_width}} │ "
+            f"{_line_at(source_lines, line_number)}"
+            for line_number in rendered_lines
+        )
+    else:
+        lines.extend(
+            f"{line_number:>{line_number_width}} │ {text}"
+            for line_number, text in fallback_lines
+        )
+
+    lines.append(f"{pad} │")
+    if detail is not None:
+        lines.append(f"{pad} = {detail}")
+    return lines
 
 
 def _source_line_range(

@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import sys
 from collections.abc import Callable
-from dataclasses import asdict
 from pathlib import Path
 from typing import Annotated, Literal, TypedDict, Unpack
 
@@ -21,21 +20,19 @@ from scb_check.pipeline import analyze
 from scb_check.reporting.render import render_flags
 from scb_check.reporting.score import compute_report
 
-_ContextSetting = str | int | bool | tuple[str, ...] | list[str] | None
-_OutputFormat = Literal["human", "json"]
-_FlagValue = Literal[False, True]
-_OUTPUT_FORMAT_KEY = "scb_check_output_format"
-_REPORT_KEY = "scb_check_report"
-_DISABLE_SG_KEY = "scb_check_disable_sg"
-_MIN_DUPLICATE_LINES_KEY = "scb_check_min_duplicate_lines"
-_OUTPUT_FORMATS: dict[str, _OutputFormat] = {
-    "human": "human",
-    "json": "json",
-}
+OUTPUT_FORMAT_KEY = "scb_check_output_format"
+REPORT_KEY = "scb_check_report"
+DISABLE_SG_KEY = "scb_check_disable_sg"
+MIN_DUPLICATE_LINES_KEY = "scb_check_min_duplicate_lines"
 
 
-class _TyperCommandKwargs(TypedDict, total=False):
-    context_settings: dict[str, _ContextSetting] | None
+class TyperCommandKwargs(TypedDict, total=False):
+    """Keyword arguments accepted by `TyperCommand`."""
+
+    context_settings: dict[
+        str,
+        str | int | bool | tuple[str, ...] | list[str] | None,
+    ] | None
     callback: Callable[..., None] | None
     params: list[click.Parameter] | None
     help: str | None
@@ -50,17 +47,20 @@ class _TyperCommandKwargs(TypedDict, total=False):
     rich_help_panel: str | None
 
 
-class _CheckCommand(TyperCommand):
+class CheckCommand(TyperCommand):
+    """Typer command that injects shared `check` options."""
+
     def __init__(
         self,
         name: str | None,
-        **kwargs: Unpack[_TyperCommandKwargs],
+        **kwargs: Unpack[TyperCommandKwargs],
     ) -> None:
+        """Initialize the command with custom click options."""
         params = kwargs.get("params")
         command_options = [
             click.Option(
                 ["--output-format"],
-                type=click.Choice(tuple(_OUTPUT_FORMATS)),
+                type=click.Choice(("human", "json")),
                 default="human",
                 show_default=True,
                 expose_value=False,
@@ -71,14 +71,14 @@ class _CheckCommand(TyperCommand):
                 ["--report"],
                 is_flag=True,
                 expose_value=False,
-                callback=_store_flag(_REPORT_KEY),
+                callback=_store_flag(REPORT_KEY),
                 help="Emit JSON report.",
             ),
             click.Option(
                 ["--disable-sg"],
                 is_flag=True,
                 expose_value=False,
-                callback=_store_flag(_DISABLE_SG_KEY),
+                callback=_store_flag(DISABLE_SG_KEY),
                 help="Disable ast-grep subprocess analysis.",
             ),
             click.Option(
@@ -102,8 +102,8 @@ def _store_output_format(
         return
     if ctx.get_parameter_source(param.name) is not click.core.ParameterSource.COMMANDLINE:
         return
-    if value in _OUTPUT_FORMATS:
-        ctx.meta[_OUTPUT_FORMAT_KEY] = value
+    if value in {"human", "json"}:
+        ctx.meta[OUTPUT_FORMAT_KEY] = value
 
 
 def _store_min_duplicate_lines(
@@ -112,16 +112,16 @@ def _store_min_duplicate_lines(
     value: int | None,
 ) -> None:
     if value is not None:
-        ctx.meta[_MIN_DUPLICATE_LINES_KEY] = value
+        ctx.meta[MIN_DUPLICATE_LINES_KEY] = value
 
 
 def _store_flag(
     key: str,
-) -> Callable[[click.Context, click.Parameter, _FlagValue], None]:
+) -> Callable[[click.Context, click.Parameter, Literal[False, True]], None]:
     def callback(
         ctx: click.Context,
         _param: click.Parameter,
-        value: _FlagValue,
+        value: Literal[False, True],
     ) -> None:
         if value:
             ctx.meta[key] = True
@@ -129,9 +129,9 @@ def _store_flag(
     return callback
 
 
-def _resolve_output(ctx: typer.Context) -> _OutputFormat:
+def _resolve_output(ctx: typer.Context) -> Literal["human", "json"]:
     explicit_format = _explicit_output_format(ctx)
-    report = bool(ctx.meta.get(_REPORT_KEY, False))
+    report = bool(ctx.meta.get(REPORT_KEY, False))
 
     if report and explicit_format == "human":
         raise ValueError("`--report` and `--output-format human` cannot be used together")
@@ -139,17 +139,19 @@ def _resolve_output(ctx: typer.Context) -> _OutputFormat:
     return "json" if report else explicit_format or "human"
 
 
-def _explicit_output_format(ctx: typer.Context) -> _OutputFormat | None:
-    value = ctx.meta.get(_OUTPUT_FORMAT_KEY)
-    return _OUTPUT_FORMATS.get(value) if isinstance(value, str) else None
+def _explicit_output_format(ctx: typer.Context) -> Literal["human", "json"] | None:
+    value = ctx.meta.get(OUTPUT_FORMAT_KEY)
+    if value in {"human", "json"}:
+        return value
+    return None
 
 
 def _min_duplicate_lines(ctx: typer.Context) -> int | None:
-    value = ctx.meta.get(_MIN_DUPLICATE_LINES_KEY)
+    value = ctx.meta.get(MIN_DUPLICATE_LINES_KEY)
     return value if isinstance(value, int) else None
 
 
-CHECK_COMMAND_CLASS = _CheckCommand
+CHECK_COMMAND_CLASS = CheckCommand
 
 
 def check(
@@ -173,7 +175,7 @@ def check(
         bool,
         typer.Option(
             "--include-all",
-            help="Include all ast-grep findings, including ignored and boundary-suppressed findings.",
+            help="Include gitignored files, ignored rule findings, lower-severity ast-grep findings, and boundary-suppressed ast-grep findings.",
         ),
     ] = False,
 ) -> None:
@@ -192,19 +194,19 @@ def check(
             path,
             config,
             include_all=include_all,
-            disable_sg=bool(ctx.meta.get(_DISABLE_SG_KEY, False)),
+            disable_sg=bool(ctx.meta.get(DISABLE_SG_KEY, False)),
         )
     except (ConfigError, IgnoreDirectiveError, OSError, ValueError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from exc
 
-    if not result.flags.total_loc_by_file:
+    if not result.flags.lines.total_loc_by_file:
         typer.echo(f"no Python files could be parsed at {path}", err=True)
         raise typer.Exit(code=2)
 
     if output_format == "json":
         report_payload = compute_report(result.flags)
-        json.dump(asdict(report_payload), sys.stdout)
+        json.dump(report_payload.to_dict(), sys.stdout)
         return
 
     flags = result.flags

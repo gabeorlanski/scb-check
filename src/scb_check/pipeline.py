@@ -6,40 +6,46 @@ from collections import Counter
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
+from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from scb_check.analysis.astgrep import run_sg
 from scb_check.analysis.clones import detect_clones
-from scb_check.analysis.ignores import BoundaryDirective
-from scb_check.analysis.ignores import IgnoreDirective
-from scb_check.analysis.ignores import IgnoreDirectiveError
-from scb_check.analysis.ignores import parse_boundary_directives
-from scb_check.analysis.ignores import parse_ignore_directives
-from scb_check.analysis.loc import sloc_line_numbers
-from scb_check.analysis.parse import ParseError
-from scb_check.analysis.parse import parse_file
-from scb_check.analysis.symbols import extract_functions
-from scb_check.analysis.trivial_wrappers import TRIVIAL_WRAPPER_RULE_ID
-from scb_check.analysis.trivial_wrappers import detect_trivial_wrappers
 from scb_check.config import Config
 from scb_check.logging import get_logger
 from scb_check.models import AstGrepHit
 from scb_check.models import CloneBlock
 from scb_check.models import FileLineSet
+from scb_check.models import FindingGroups
 from scb_check.models import Flags
-from scb_check.models import ParsedSymbol
-from scb_check.models import TrivialWrapper
+from scb_check.models import LineGroups
+from scb_check.resources import RuleSeverity
+from scb_check.resources import load_rule_severities
 from scb_check.resources import load_thresholds
 from scb_check.resources import rules_file
+from scb_check.rules.registry import structural_rule_ids
+from scb_check.rules.runner import run_rules
+from scb_check.tree_walking.directives import BoundaryDirective
+from scb_check.tree_walking.directives import IgnoreDirective
+from scb_check.tree_walking.directives import IgnoreDirectiveError
+from scb_check.tree_walking.directives import load_ast_grep_rule_ids
+from scb_check.tree_walking.directives import parse_boundary_directives
+from scb_check.tree_walking.directives import parse_ignore_directives
+from scb_check.tree_walking.dispatch import ParsedFile
+from scb_check.tree_walking.dispatch import ProjectParseError
+from scb_check.tree_walking.dispatch import (
+    parse_source_file as dispatch_parse_source_file,
+)
+from scb_check.tree_walking.models import RuleFinding
+from scb_check.tree_walking.models import SymbolIR
+from scb_check.tree_walking.models import SymbolKind
+from scb_check.tree_walking.semantic import build_project
 from scb_check.walker import walk_python_files
-
-if TYPE_CHECKING:
-    from tree_sitter import Tree
 
 logger = get_logger(__name__)
 
 __all__ = ["AnalysisResult", "IgnoreDirectiveError", "analyze", "analyze_files"]
+
 
 @dataclass(frozen=True, slots=True)
 class AnalysisResult:
@@ -50,11 +56,24 @@ class AnalysisResult:
 
 
 @dataclass(frozen=True, slots=True)
+class ParsedSources:
+    """Parsed files and source indexes collected from input paths."""
+
+    parsed_files: tuple[ParsedFile, ...]
+    total_loc_by_file: tuple[tuple[Path, int], ...]
+    sloc_lines_by_file: dict[Path, frozenset[int]]
+    source_by_file: dict[Path, str]
+    source_lines_by_file: dict[Path, tuple[str, ...]]
+
+
+@dataclass(frozen=True, slots=True)
 class Findings:
+    """Collected findings before sorting and line-set projection."""
+
     clones: tuple[CloneBlock, ...]
     ast_hits: tuple[AstGrepHit, ...]
-    trivial_wrappers: tuple[TrivialWrapper, ...]
-    functions: tuple[ParsedSymbol, ...]
+    structural_findings: tuple[RuleFinding, ...]
+    functions: tuple[SymbolIR, ...]
     total_loc_by_file: tuple[tuple[Path, int], ...]
     sloc_lines_by_file: dict[Path, frozenset[int]]
     source_lines_by_file: dict[Path, tuple[str, ...]]
@@ -68,7 +87,7 @@ def analyze(
     disable_sg: bool = False,
 ) -> AnalysisResult:
     """Analyze Python files under `path` using `config`."""
-    files = tuple(sorted(walk_python_files(path, config)))
+    files = tuple(sorted(walk_python_files(path, config, include_ignored=include_all)))
     if not files:
         raise FileNotFoundError(f"no Python files found at {path}")
     return analyze_files(files, include_all=include_all, disable_sg=disable_sg)
@@ -99,84 +118,182 @@ def _collect_findings(
     include_all: bool,
     disable_sg: bool,
 ) -> Findings:
-    functions: list[ParsedSymbol] = []
+    sources = _parse_sources(files)
+    project = build_project(tuple(parsed.module for parsed in sources.parsed_files))
+    functions = _function_symbols(tuple(project.symbols_by_qualified_name.values()))
+    structural_findings = run_rules(project)
+    ast_hits, filtered_structural_findings = _run_and_filter_rules(
+        sources,
+        functions,
+        structural_findings,
+        include_all=include_all,
+        disable_sg=disable_sg,
+    )
+    return Findings(
+        clones=detect_clones(sources.parsed_files),
+        ast_hits=ast_hits,
+        structural_findings=filtered_structural_findings,
+        functions=functions,
+        total_loc_by_file=sources.total_loc_by_file,
+        sloc_lines_by_file=sources.sloc_lines_by_file,
+        source_lines_by_file=sources.source_lines_by_file,
+    )
+
+
+def _parse_sources(files: tuple[Path, ...]) -> ParsedSources:
+    parsed_files: list[ParsedFile] = []
     total_loc_by_file: list[tuple[Path, int]] = []
     sloc_lines_by_file: dict[Path, frozenset[int]] = {}
     source_by_file: dict[Path, str] = {}
     source_lines_by_file: dict[Path, tuple[str, ...]] = {}
-    parsed_files: list[tuple[Path, str, Tree]] = []
 
     for file_path in files:
-        try:
-            source, tree = parse_file(file_path)
-        except ParseError as exc:
-            logger.warning(
-                "failed to parse file",
-                file=str(file_path),
-                error=str(exc),
-            )
+        if (parsed_source := _parse_source_file(file_path)) is None:
             continue
-
+        source, parsed = parsed_source
+        parsed_files.append(parsed)
         source_by_file[file_path] = source
         source_lines_by_file[file_path] = tuple(source.splitlines())
-        parsed_files.append((file_path, source, tree))
-        sloc_lines = sloc_line_numbers(source, tree)
-        sloc_lines_by_file[file_path] = sloc_lines
-        total_loc_by_file.append((file_path, len(sloc_lines)))
-        functions.extend(extract_functions(file_path, tree, sloc_lines))
+        sloc_lines_by_file[file_path] = parsed.module.sloc_lines
+        total_loc_by_file.append((file_path, len(parsed.module.sloc_lines)))
 
-    trivial_wrappers = detect_trivial_wrappers(
-        tuple(parsed_files),
-        tuple(functions),
-    )
-
-    with rules_file() as rules_path:
-        ast_hits = () if disable_sg else run_sg(tuple(source_lines_by_file), rules_path)
-        thresholds = {} if disable_sg else load_thresholds(rules_path)
-        if include_all:
-            filtered_ast_hits = ast_hits
-            filtered_trivial_wrappers = trivial_wrappers
-        else:
-            ignore_directives = parse_ignore_directives(
-                source_by_file,
-                rules_path,
-                extra_rule_ids=frozenset({TRIVIAL_WRAPPER_RULE_ID}),
-            )
-            boundary_directives = parse_boundary_directives(source_by_file)
-            boundary_ranges = _boundary_function_ranges(
-                boundary_directives,
-                tuple(functions),
-            )
-            filtered_ast_hits = _filter_ignored_ast_hits(
-                ast_hits,
-                ignore_directives,
-            )
-            filtered_trivial_wrappers = _filter_ignored_trivial_wrappers(
-                trivial_wrappers,
-                ignore_directives,
-            )
-            filtered_ast_hits = _filter_boundary_ast_hits(
-                filtered_ast_hits,
-                boundary_ranges,
-            )
-            filtered_ast_hits = _apply_count_thresholds(
-                filtered_ast_hits,
-                thresholds,
-            )
-    return Findings(
-        clones=detect_clones(tuple(parsed_files)),
-        ast_hits=filtered_ast_hits,
-        trivial_wrappers=filtered_trivial_wrappers,
-        functions=tuple(functions),
+    return ParsedSources(
+        parsed_files=tuple(parsed_files),
         total_loc_by_file=tuple(total_loc_by_file),
         sloc_lines_by_file=sloc_lines_by_file,
+        source_by_file=source_by_file,
         source_lines_by_file=source_lines_by_file,
+    )
+
+
+def _parse_source_file(file_path: Path) -> tuple[str, ParsedFile] | None:
+    try:
+        source = _read_source(file_path)
+        return (source, dispatch_parse_source_file(file_path, source))
+    except ProjectParseError as exc:
+        logger.warning(
+            "failed to parse file",
+            file=str(file_path),
+            error=str(exc),
+        )
+        return None
+
+
+def _run_and_filter_rules(
+    sources: ParsedSources,
+    functions: tuple[SymbolIR, ...],
+    structural_findings: tuple[RuleFinding, ...],
+    *,
+    include_all: bool,
+    disable_sg: bool,
+) -> tuple[tuple[AstGrepHit, ...], tuple[RuleFinding, ...]]:
+    with rules_file() as rules_path:
+        ast_hits, thresholds = _run_ast_grep(
+            sources,
+            rules_path,
+            disable_sg=disable_sg,
+        )
+        if include_all:
+            return ast_hits, structural_findings
+
+        ignore_directives = parse_ignore_directives(
+            sources.source_by_file,
+            valid_rule_ids=_valid_rule_ids(rules_path),
+        )
+        boundary_ranges = _boundary_function_ranges(
+            parse_boundary_directives(sources.source_by_file),
+            functions,
+        )
+        return (
+            _filter_ast_hits(
+                ast_hits,
+                ignore_directives,
+                boundary_ranges,
+                thresholds,
+            ),
+            _filter_ignored_items(
+                structural_findings,
+                ignore_directives,
+                lambda finding: (
+                    finding.file,
+                    finding.start_line,
+                    finding.rule_id,
+                ),
+            ),
+        )
+
+
+def _run_ast_grep(
+    sources: ParsedSources,
+    rules_path: Path,
+    *,
+    disable_sg: bool,
+) -> tuple[tuple[AstGrepHit, ...], dict[str, int]]:
+    if disable_sg:
+        return (), {}
+
+    thresholds = load_thresholds(rules_path)
+    rule_severities = load_rule_severities(rules_path)
+    ast_hits = _with_ast_hit_severities(
+        run_sg(tuple(sources.source_lines_by_file), rules_path),
+        rule_severities,
+    )
+    return ast_hits, thresholds
+
+
+def _filter_ast_hits(
+    ast_hits: tuple[AstGrepHit, ...],
+    ignore_directives: tuple[IgnoreDirective, ...],
+    boundary_ranges: tuple[tuple[Path, int, int], ...],
+    thresholds: dict[str, int],
+) -> tuple[AstGrepHit, ...]:
+    filtered = _filter_info_ast_hits(ast_hits)
+    filtered = _filter_ignored_items(
+        filtered,
+        ignore_directives,
+        lambda hit: (hit.file, hit.line, hit.rule_id),
+    )
+    filtered = _filter_boundary_ast_hits(filtered, boundary_ranges)
+    return _apply_count_thresholds(filtered, thresholds)
+
+
+def _read_source(file_path: Path) -> str:
+    try:
+        return file_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        logger.warning(
+            "file is not valid UTF-8, reading with replacement characters",
+            file=str(file_path),
+        )
+        return file_path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        raise ProjectParseError(
+            f"failed to read source file: `{file_path}`",
+            file_path=file_path,
+        ) from exc
+
+
+def _valid_rule_ids(rules_path: Path) -> frozenset[str]:
+    ast_rule_ids = load_ast_grep_rule_ids(rules_path)
+    structural_ids = structural_rule_ids()
+    duplicate_ids = ast_rule_ids & structural_ids
+    if duplicate_ids:
+        duplicate = min(duplicate_ids)
+        raise IgnoreDirectiveError(f"duplicate rule id: {duplicate}")
+    return ast_rule_ids | structural_ids
+
+
+def _function_symbols(symbols: tuple[SymbolIR, ...]) -> tuple[SymbolIR, ...]:
+    return tuple(
+        symbol
+        for symbol in symbols
+        if symbol.kind in {SymbolKind.FUNCTION, SymbolKind.METHOD}
     )
 
 
 def _boundary_function_ranges(
     directives: tuple[BoundaryDirective, ...],
-    functions: tuple[ParsedSymbol, ...],
+    functions: tuple[SymbolIR, ...],
 ) -> tuple[tuple[Path, int, int], ...]:
     ranges: list[tuple[Path, int, int]] = []
     errors: list[str] = []
@@ -197,8 +314,8 @@ def _boundary_function_ranges(
 
 def _containing_function(
     directive: BoundaryDirective,
-    functions: tuple[ParsedSymbol, ...],
-) -> ParsedSymbol | None:
+    functions: tuple[SymbolIR, ...],
+) -> SymbolIR | None:
     containing = tuple(
         function
         for function in functions
@@ -212,7 +329,22 @@ def _containing_function(
     )
 
 
-# scbc ignore[trivial-wrapper] Names boundary filtering for the pipeline.
+def _with_ast_hit_severities(
+    ast_hits: tuple[AstGrepHit, ...],
+    rule_severities: dict[str, RuleSeverity],
+) -> tuple[AstGrepHit, ...]:
+    return tuple(
+        replace(hit, severity=rule_severities.get(hit.rule_id, hit.severity))
+        for hit in ast_hits
+    )
+
+
+def _filter_info_ast_hits(
+    ast_hits: tuple[AstGrepHit, ...],
+) -> tuple[AstGrepHit, ...]:
+    return tuple(hit for hit in ast_hits if hit.severity != "info")
+
+
 def _filter_boundary_ast_hits(
     ast_hits: tuple[AstGrepHit, ...],
     boundary_ranges: tuple[tuple[Path, int, int], ...],
@@ -246,35 +378,22 @@ def _apply_count_thresholds(
     )
 
 
-def _filter_ignored_ast_hits(
-    ast_hits: tuple[AstGrepHit, ...],
+def _filter_ignored_items[T](
+    items: tuple[T, ...],
     ignore_directives: tuple[IgnoreDirective, ...],
-) -> tuple[AstGrepHit, ...]:
-    ignored = {
+    key: Callable[[T], tuple[Path, int, str]],
+) -> tuple[T, ...]:
+    ignored = _ignored_rule_keys(ignore_directives)
+    return tuple(item for item in items if key(item) not in ignored)
+
+
+def _ignored_rule_keys(
+    ignore_directives: tuple[IgnoreDirective, ...],
+) -> frozenset[tuple[Path, int, str]]:
+    return frozenset(
         (directive.file, directive.target_line, rule_id)
         for directive in ignore_directives
         for rule_id in directive.rule_ids
-    }
-    return tuple(
-        hit
-        for hit in ast_hits
-        if (hit.file, hit.line, hit.rule_id) not in ignored
-    )
-
-
-def _filter_ignored_trivial_wrappers(
-    wrappers: tuple[TrivialWrapper, ...],
-    ignore_directives: tuple[IgnoreDirective, ...],
-) -> tuple[TrivialWrapper, ...]:
-    ignored = {
-        (directive.file, directive.target_line)
-        for directive in ignore_directives
-        if TRIVIAL_WRAPPER_RULE_ID in directive.rule_ids
-    }
-    return tuple(
-        wrapper
-        for wrapper in wrappers
-        if (wrapper.file, wrapper.start_line) not in ignored
     )
 
 
@@ -296,13 +415,14 @@ def _build_flags(findings: Findings) -> Flags:
             hit.rule_id,
         ),
     )
-    sorted_trivial_wrappers = sorted(
-        findings.trivial_wrappers,
-        key=lambda wrapper: (
-            wrapper.file.as_posix(),
-            wrapper.start_line,
-            wrapper.col,
-            wrapper.name,
+    sorted_structural_findings = sorted(
+        findings.structural_findings,
+        key=lambda finding: (
+            finding.file.as_posix(),
+            finding.start_line,
+            finding.span.start_col,
+            finding.rule_id,
+            finding.subject_name,
         ),
     )
     sorted_functions = sorted(
@@ -326,26 +446,32 @@ def _build_flags(findings: Findings) -> Flags:
         findings.sloc_lines_by_file,
         lambda hit: (hit.file, hit.line, hit.end_line),
     )
-    trivial_wrapper_sloc_lines = _collect_sloc_lines(
-        sorted_trivial_wrappers,
+    structural_sloc_lines = _collect_sloc_lines(
+        sorted_structural_findings,
         findings.sloc_lines_by_file,
-        lambda wrapper: (wrapper.file, wrapper.start_line, wrapper.end_line),
+        lambda finding: (finding.file, finding.start_line, finding.end_line),
     )
 
-    return Flags.from_parts(
-        clones=sorted_clones,
-        ast_grep_hits=sorted_ast_hits,
-        trivial_wrappers=sorted_trivial_wrappers,
-        high_cc_functions=high_cc,
-        high_cog_functions=high_cog,
-        total_loc_by_file=sorted(
-            findings.total_loc_by_file,
-            key=lambda item: item[0].as_posix(),
+    return Flags(
+        findings=FindingGroups(
+            clones=tuple(sorted_clones),
+            ast_grep_hits=tuple(sorted_ast_hits),
+            structural_findings=tuple(sorted_structural_findings),
+            high_cc_functions=tuple(high_cc),
+            high_cog_functions=tuple(high_cog),
+            all_functions=tuple(sorted_functions),
         ),
-        all_functions=sorted_functions,
-        clone_sloc_lines_by_file=clone_sloc_lines,
-        ast_sloc_lines_by_file=ast_sloc_lines,
-        trivial_wrapper_sloc_lines_by_file=trivial_wrapper_sloc_lines,
+        lines=LineGroups(
+            total_loc_by_file=tuple(
+                sorted(
+                    findings.total_loc_by_file,
+                    key=lambda item: item[0].as_posix(),
+                ),
+            ),
+            clone_sloc_lines_by_file=tuple(clone_sloc_lines),
+            ast_sloc_lines_by_file=tuple(ast_sloc_lines),
+            structural_sloc_lines_by_file=tuple(structural_sloc_lines),
+        ),
     )
 
 

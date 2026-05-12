@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -24,6 +25,46 @@ def test_missing_sg_returns_no_hits(
     hits = run_sg((FIXTURES / "corpus" / "module_c.py",), rules_file)
 
     assert hits == ()
+
+
+def test_run_sg_prefers_ast_grep_next_to_python(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Python-environment `ast-grep` wins over a broken `sg` on `PATH`."""
+    rules_file = tmp_path / "rules.yaml"
+    rules_file.write_text("---\nid: x\nrule:\n  pattern: x\n", encoding="utf-8")
+    env_bin = tmp_path / "env" / "bin"
+    env_bin.mkdir(parents=True)
+    ast_grep = env_bin / "ast-grep"
+    ast_grep.write_text("", encoding="utf-8")
+    ast_grep.chmod(0o755)
+    monkeypatch.setattr(sys, "executable", str(env_bin / "python"))
+    monkeypatch.setattr(
+        "scb_check.analysis.astgrep.shutil.which",
+        lambda binary: "/broken/sg" if binary == "sg" else None,
+    )
+    commands: list[list[str]] = []
+
+    def fake_run(
+        command: list[str],
+        *_args: object,
+        **_kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        return subprocess.CompletedProcess(
+            args=command,
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+    monkeypatch.setattr("scb_check.analysis.astgrep.subprocess.run", fake_run)
+
+    hits = run_sg((tmp_path / "sample.py",), rules_file)
+
+    assert hits == ()
+    assert commands[0][0] == str(ast_grep)
 
 
 def test_sg_finds_bundled_rule() -> None:

@@ -2,23 +2,23 @@ from __future__ import annotations
 
 from pathlib import Path
 from textwrap import dedent
-from typing import TYPE_CHECKING
 
 from conftest import FIXTURES
 
 from scb_check.analysis.clones import detect_clones
-from scb_check.analysis.parse import parse_file
-
-if TYPE_CHECKING:
-    from tree_sitter import Tree
+from scb_check.tree_walking.dispatch import ParsedFile
+from scb_check.tree_walking.languages.python import PythonParser
 
 
 def test_detects_fixture_clones() -> None:
     """Fixture clone groups include counts, peers, and preview lines."""
     source_path = FIXTURES / "corpus" / "module_a.py"
-    source, tree = parse_file(source_path)
+    parsed = PythonParser().parse(
+        source_path,
+        source_path.read_text(encoding="utf-8"),
+    )
 
-    clones = detect_clones(((source_path, source, tree),))
+    clones = detect_clones((parsed,))
 
     assert clones
     assert all(clone.instance_count >= 2 for clone in clones)
@@ -162,11 +162,13 @@ def _parse_source(
     source: str,
     *,
     name: str = "sample.py",
-) -> tuple[Path, str, Tree]:
+) -> ParsedFile:
     source_path = tmp_path / name
     source_path.write_text(
         dedent(source).strip() + "\n",
         encoding="utf-8",
     )
-    parsed_source, tree = parse_file(source_path)
-    return source_path, parsed_source, tree
+    return PythonParser().parse(
+        source_path,
+        source_path.read_text(encoding="utf-8"),
+    )

@@ -1,8 +1,10 @@
 # `scb-check/` — package root
 
-Three layers:
+Layers:
 
-- [`analysis/`](analysis/AGENTS.md) — source → findings
+- [`tree_walking/`](tree_walking/AGENTS.md) — source text → language-agnostic IR, SLOC, source directives, semantic project context
+- [`rules/`](rules/AGENTS.md) — structural rules over tree-walking IR
+- [`analysis/`](analysis/AGENTS.md) — ast-grep subprocess integration and clone detection
 - [`reporting/`](reporting/AGENTS.md) — findings → output
 - [`commands/`](commands/AGENTS.md) — CLI subcommand wiring
 - This level — boundaries and shared types
@@ -10,10 +12,10 @@ Three layers:
 ## Modules at this level
 
 - [`cli.py`](cli.py) — top-level Typer app wiring only. Defines the root command group and registers subcommands from [`commands/`](commands/AGENTS.md).
-- [`pipeline.py`](pipeline.py) — public `analyze(path, config) -> AnalysisResult` wires path walking, collection, parsing, analysis calls, and `_build_flags`. Tests may use `analyze_files(files)` for focused analysis coverage.
-- [`config.py`](config.py), [`walker.py`](walker.py) — IO boundaries. `load_config` walks upward to find `scb_check.toml` or `[tool.scb-check]`, stopping at a `.git` dir. `walk_python_files` is a pathlib-based generator that applies `DEFAULT_EXCLUDED_DIRS` plus user `exclude` globs (supports `**`).
+- [`pipeline.py`](pipeline.py) — public `analyze(path, config) -> AnalysisResult` wires path walking, collection, parsing, semantic indexing, ast-grep, structural rules, clone detection, filtering, and `_build_flags`. Tests may use `analyze_files(files)` for focused analysis coverage.
+- [`config.py`](config.py), [`walker.py`](walker.py) — IO boundaries. `load_config` walks upward to find `scb_check.toml` or `[tool.scb-check]`, stopping at a `.git` dir. `walk_python_files` is a pathlib-based generator that applies `DEFAULT_EXCLUDED_DIRS`, `.gitignore` globs, and user `exclude` globs (supports `**`).
 - [`logging.py`](logging.py) — structlog setup. `configure_logging(verbosity)` runs once from the CLI; modules elsewhere just call `get_logger(__name__)`.
-- [`models.py`](models.py) — shared frozen dataclasses. Both layers import from here. Don't split these into per-layer models unless a type stops being shared.
+- [`models.py`](models.py) — shared frozen dataclasses for reporting/analysis. Tree-walking IR models live in [`tree_walking/models.py`](tree_walking/models.py).
 
 ## Rules
 

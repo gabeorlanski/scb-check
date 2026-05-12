@@ -2,19 +2,20 @@
 
 from __future__ import annotations
 
-import io
-from typing import Annotated, cast
+from typing import Annotated
 
 import typer
 import yaml
 
-from scb_check.resources import rule_texts
+from scb_check.resources import RuleDocument
+from scb_check.resources import find_rule_document
+from scb_check.rules.registry import structural_rule_metadata
 
 
 def rule(
-    rule_name: Annotated[str, typer.Argument(help="ast-grep rule id")],
+    rule_name: Annotated[str, typer.Argument(help="rule id")],
 ) -> None:
-    """Print the bundled ast-grep rule matching `rule_name`."""
+    """Print bundled ast-grep YAML or structural rule metadata."""
     try:
         rule_payload = _find_rule(rule_name)
     except (OSError, yaml.YAMLError) as exc:
@@ -29,11 +30,10 @@ def rule(
     typer.echo(rendered)
 
 
-def _find_rule(rule_name: str) -> dict[str, str] | None:
-    matches = (
-        cast("dict[str, str]", document)
-        for _, text in rule_texts()
-        for document in yaml.safe_load_all(io.StringIO(text))
-        if isinstance(document, dict) and document.get("id") == rule_name
-    )
-    return next(matches, None)
+def _find_rule(rule_name: str) -> RuleDocument | None:
+    ast_grep_rule = find_rule_document(rule_name)
+    if ast_grep_rule is not None:
+        return ast_grep_rule
+
+    metadata = structural_rule_metadata(rule_name)
+    return dict(metadata) if metadata is not None else None

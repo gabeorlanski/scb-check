@@ -5,57 +5,66 @@ from textwrap import dedent
 
 import pytest
 
+from scb_check.config import Config
 from scb_check.models import AstGrepHit
 from scb_check.pipeline import IgnoreDirectiveError
+from scb_check.pipeline import analyze
 from scb_check.pipeline import analyze_files
 
 
-def test_detects_single_return_function_with_cross_file_usages(
+def test_include_all_extends_discovery_to_gitignored_files(tmp_path: Path) -> None:
+    """Default discovery respects `.gitignore`; `include_all` scans those files."""
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / ".gitignore").write_text("ignored.py\n", encoding="utf-8")
+    keep = root / "keep.py"
+    ignored = root / "ignored.py"
+    keep.write_text("x = 1\n", encoding="utf-8")
+    ignored.write_text("y = 1\n", encoding="utf-8")
+
+    config = Config(exclude=(), base_dir=root)
+
+    default_result = analyze(root, config, disable_sg=True)
+    include_all_result = analyze(root, config, include_all=True, disable_sg=True)
+
+    assert tuple(path for path, _loc in default_result.flags.lines.total_loc_by_file) == (
+        keep.resolve(),
+    )
+    assert {path for path, _loc in include_all_result.flags.lines.total_loc_by_file} == {
+        keep.resolve(),
+        ignored.resolve(),
+    }
+
+
+def test_detects_single_return_structural_finding(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Single-return functions are reported with resolved project usages."""
-    package = tmp_path / "pkg"
-    package.mkdir()
-    (package / "__init__.py").write_text("", encoding="utf-8")
+    """Single-return functions are reported as structural findings."""
     source_file = _write_source(
-        package,
-        "api.py",
+        tmp_path,
+        "sample.py",
         '''
         def trivial(value):
             """Legacy wrapper."""
             return value
         ''',
     )
-    usage_file = _write_source(
-        package,
-        "consumer.py",
-        """
-        from pkg.api import trivial
-
-        RESULT = trivial(VALUE)
-        HANDLER = trivial
-        """,
-    )
 
     monkeypatch.setattr(
         "scb_check.pipeline.run_sg", lambda files, rules_path: (),
     )
 
-    result = analyze_files((source_file, usage_file))
+    result = analyze_files((source_file,))
 
-    wrapper = next(
+    finding = next(
         finding
-        for finding in result.flags.trivial_wrappers
-        if finding.name == "trivial"
+        for finding in result.flags.findings.structural_findings
+        if finding.subject_name == "trivial"
     )
-    assert wrapper.kind == "single_return_function"
-    assert wrapper.usage_count == 2
-    assert tuple((usage.file, usage.line, usage.kind) for usage in wrapper.usages) == (
-        (usage_file, 3, "call"),
-        (usage_file, 4, "reference"),
-    )
-    assert result.flags.trivial_wrapper_sloc_lines_by_file
+    assert finding.rule_id == "trivial-wrapper"
+    assert finding.message == "`trivial` adds no behavior"
+    assert result.flags.lines.structural_sloc_lines_by_file
 
 
 def test_single_return_functions_returning_constants_are_not_trivial_wrappers(
@@ -83,8 +92,8 @@ def test_single_return_functions_returning_constants_are_not_trivial_wrappers(
 
     result = analyze_files((source_file,))
 
-    assert result.flags.trivial_wrappers == ()
-    assert result.flags.trivial_wrapper_sloc_lines_by_file == ()
+    assert result.flags.findings.structural_findings == ()
+    assert result.flags.lines.structural_sloc_lines_by_file == ()
 
 
 def test_single_return_functions_calling_external_functions_are_not_trivial_wrappers(
@@ -109,8 +118,8 @@ def test_single_return_functions_calling_external_functions_are_not_trivial_wrap
 
     result = analyze_files((source_file,))
 
-    assert result.flags.trivial_wrappers == ()
-    assert result.flags.trivial_wrapper_sloc_lines_by_file == ()
+    assert result.flags.findings.structural_findings == ()
+    assert result.flags.lines.structural_sloc_lines_by_file == ()
 
 
 def test_required_api_single_return_methods_are_not_trivial_wrappers(
@@ -139,8 +148,8 @@ def test_required_api_single_return_methods_are_not_trivial_wrappers(
 
     result = analyze_files((source_file,))
 
-    assert result.flags.trivial_wrappers == ()
-    assert result.flags.trivial_wrapper_sloc_lines_by_file == ()
+    assert result.flags.findings.structural_findings == ()
+    assert result.flags.lines.structural_sloc_lines_by_file == ()
 
 
 def test_detects_project_function_passthrough_wrapper(
@@ -168,25 +177,22 @@ def test_detects_project_function_passthrough_wrapper(
 
     result = analyze_files((source_file,))
 
-    wrapper = next(
+    finding = next(
         finding
-        for finding in result.flags.trivial_wrappers
-        if finding.name == "clean"
+        for finding in result.flags.findings.structural_findings
+        if finding.subject_name == "clean"
     )
-    assert wrapper.kind == "single_return_function"
+    assert finding.rule_id == "trivial-wrapper"
 
 
-def test_detects_function_alias_with_cross_file_usages(
+def test_function_aliases_are_not_structural_wrappers(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Aliases to scanned functions are reported as trivial wrappers."""
-    package = tmp_path / "pkg"
-    package.mkdir()
-    (package / "__init__.py").write_text("", encoding="utf-8")
+    """The full cutover reports function wrappers, not alias assignments."""
     source_file = _write_source(
-        package,
-        "api.py",
+        tmp_path,
+        "sample.py",
         """
         def real(value):
             if value:
@@ -196,39 +202,21 @@ def test_detects_function_alias_with_cross_file_usages(
         legacy = real
         """,
     )
-    usage_file = _write_source(
-        package,
-        "consumer.py",
-        """
-        from pkg.api import legacy
-
-        RESULT = legacy(VALUE)
-        """,
-    )
 
     monkeypatch.setattr(
         "scb_check.pipeline.run_sg", lambda files, rules_path: (),
     )
 
-    result = analyze_files((source_file, usage_file))
+    result = analyze_files((source_file,))
 
-    alias = next(
-        finding
-        for finding in result.flags.trivial_wrappers
-        if finding.name == "legacy"
-    )
-    assert alias.kind == "function_alias"
-    assert alias.usage_count == 1
-    assert tuple((usage.file, usage.line, usage.kind) for usage in alias.usages) == (
-        (usage_file, 3, "call"),
-    )
+    assert result.flags.findings.structural_findings == ()
 
 
 def test_ignore_suppresses_trivial_wrapper(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Ignore directives suppress tree-sitter trivial-wrapper findings."""
+    """Ignore directives suppress structural trivial-wrapper findings."""
     source_file = _write_source(
         tmp_path,
         "sample.py",
@@ -245,15 +233,15 @@ def test_ignore_suppresses_trivial_wrapper(
 
     result = analyze_files((source_file,))
 
-    assert result.flags.trivial_wrappers == ()
-    assert result.flags.trivial_wrapper_sloc_lines_by_file == ()
+    assert result.flags.findings.structural_findings == ()
+    assert result.flags.lines.structural_sloc_lines_by_file == ()
 
 
 def test_trivial_wrapper_ignore_is_valid_without_a_finding(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """The tree-sitter trivial-wrapper rule id is valid for source ignores."""
+    """The structural trivial-wrapper rule ID is valid for source ignores."""
     source_file = _write_source(
         tmp_path,
         "sample.py",
@@ -269,7 +257,7 @@ def test_trivial_wrapper_ignore_is_valid_without_a_finding(
 
     result = analyze_files((source_file,))
 
-    assert result.flags.total_loc_by_file == ((source_file, 1),)
+    assert result.flags.lines.total_loc_by_file == ((source_file, 1),)
 
 
 def test_inline_ignore_suppresses_hit(
@@ -282,7 +270,7 @@ def test_inline_ignore_suppresses_hit(
         "sample.py",
         """
         def get_cfg_value(cfg):
-            value = cfg.get("a", {}).get("b", {})  # scbc ignore[chained-dict-get] boundary normalization for webhook payload
+            value = cfg.get("a", {}).get("b", {})  # scbc ignore[json-loads-read] boundary normalization for webhook payload
             return value
         """,
     )
@@ -290,14 +278,14 @@ def test_inline_ignore_suppresses_hit(
     monkeypatch.setattr(
         "scb_check.pipeline.run_sg",
         lambda files, rules_path: (
-            _ast_hit(source_file, 2, "chained-dict-get"),
+            _ast_hit(source_file, 2, "json-loads-read"),
         ),
     )
 
     result = analyze_files((source_file,))
 
-    assert result.flags.ast_grep_hits == ()
-    assert result.flags.ast_sloc_lines_by_file == ()
+    assert result.flags.findings.ast_grep_hits == ()
+    assert result.flags.lines.ast_sloc_lines_by_file == ()
 
 
 def test_block_ignore_suppresses_hit(
@@ -310,7 +298,7 @@ def test_block_ignore_suppresses_hit(
         "sample.py",
         """
         def get_cfg_value(cfg):
-            # scbc ignore[chained-dict-get]
+            # scbc ignore[json-loads-read]
             # boundary normalization for legacy payloads.
             # keep this until the upstream migration is complete.
 
@@ -322,13 +310,13 @@ def test_block_ignore_suppresses_hit(
     monkeypatch.setattr(
         "scb_check.pipeline.run_sg",
         lambda files, rules_path: (
-            _ast_hit(source_file, 6, "chained-dict-get"),
+            _ast_hit(source_file, 6, "json-loads-read"),
         ),
     )
 
     result = analyze_files((source_file,))
 
-    assert result.flags.ast_grep_hits == ()
+    assert result.flags.findings.ast_grep_hits == ()
 
 
 def test_ignore_accepts_multiple_rules(
@@ -341,7 +329,7 @@ def test_ignore_accepts_multiple_rules(
         "sample.py",
         """
         def get_cfg_value(cfg):
-            # scbc ignore[chained-dict-get,dict-get-empty-dict-default]
+            # scbc ignore[json-loads-read,duplicated-if-condition]
             # payload shape is normalized downstream.
             value = cfg.get("a", {}).get("b", {})
             return value
@@ -351,14 +339,14 @@ def test_ignore_accepts_multiple_rules(
     monkeypatch.setattr(
         "scb_check.pipeline.run_sg",
         lambda files, rules_path: (
-            _ast_hit(source_file, 4, "chained-dict-get"),
-            _ast_hit(source_file, 4, "dict-get-empty-dict-default"),
+            _ast_hit(source_file, 4, "json-loads-read"),
+            _ast_hit(source_file, 4, "duplicated-if-condition"),
         ),
     )
 
     result = analyze_files((source_file,))
 
-    assert result.flags.ast_grep_hits == ()
+    assert result.flags.findings.ast_grep_hits == ()
 
 
 def test_ignore_keeps_unmatched_rules(
@@ -371,7 +359,7 @@ def test_ignore_keeps_unmatched_rules(
         "sample.py",
         """
         def get_cfg_value(cfg):
-            value = cfg.get("a", {}).get("b", {})  # scbc ignore[chained-dict-get] justified boundary behavior
+            value = cfg.get("a", {}).get("b", {})  # scbc ignore[json-loads-read] justified boundary behavior
             return value
         """,
     )
@@ -379,15 +367,15 @@ def test_ignore_keeps_unmatched_rules(
     monkeypatch.setattr(
         "scb_check.pipeline.run_sg",
         lambda files, rules_path: (
-            _ast_hit(source_file, 2, "chained-dict-get"),
-            _ast_hit(source_file, 2, "dict-get-empty-dict-default"),
+            _ast_hit(source_file, 2, "json-loads-read"),
+            _ast_hit(source_file, 2, "duplicated-if-condition"),
         ),
     )
 
     result = analyze_files((source_file,))
 
-    assert tuple(hit.rule_id for hit in result.flags.ast_grep_hits) == (
-        "dict-get-empty-dict-default",
+    assert tuple(hit.rule_id for hit in result.flags.findings.ast_grep_hits) == (
+        "duplicated-if-condition",
     )
 
 
@@ -401,7 +389,7 @@ def test_ignore_reason_optional(
         "sample.py",
         """
         def get_cfg_value(cfg):
-            value = cfg.get("a", {}).get("b", {})  # scbc ignore[chained-dict-get]
+            value = cfg.get("a", {}).get("b", {})  # scbc ignore[json-loads-read]
             return value
         """,
     )
@@ -409,13 +397,13 @@ def test_ignore_reason_optional(
     monkeypatch.setattr(
         "scb_check.pipeline.run_sg",
         lambda files, rules_path: (
-            _ast_hit(source_file, 2, "chained-dict-get"),
+            _ast_hit(source_file, 2, "json-loads-read"),
         ),
     )
 
     result = analyze_files((source_file,))
 
-    assert result.flags.ast_grep_hits == ()
+    assert result.flags.findings.ast_grep_hits == ()
 
 
 def test_comment_ignore_next_code_line(
@@ -428,7 +416,7 @@ def test_comment_ignore_next_code_line(
         "sample.py",
         """
         def get_cfg_value(cfg):
-            # scbc ignore[chained-dict-get]
+            # scbc ignore[json-loads-read]
             value = cfg.get("a", {}).get("b", {})
             return value
         """,
@@ -437,13 +425,13 @@ def test_comment_ignore_next_code_line(
     monkeypatch.setattr(
         "scb_check.pipeline.run_sg",
         lambda files, rules_path: (
-            _ast_hit(source_file, 3, "chained-dict-get"),
+            _ast_hit(source_file, 3, "json-loads-read"),
         ),
     )
 
     result = analyze_files((source_file,))
 
-    assert result.flags.ast_grep_hits == ()
+    assert result.flags.findings.ast_grep_hits == ()
 
 
 def test_empty_ignore_errors(
@@ -492,7 +480,7 @@ def test_unknown_ignore_rule_errors(
 
     with pytest.raises(
         IgnoreDirectiveError,
-        match="unknown ast-grep rule id: typo-rule",
+        match="unknown rule id: typo-rule",
     ):
         analyze_files((source_file,))
 
@@ -533,7 +521,7 @@ def test_ignore_in_string_ignored(
         "sample.py",
         """
         def get_cfg_value(cfg):
-            marker = "# scbc ignore[chained-dict-get] reason"
+            marker = "# scbc ignore[json-loads-read] reason"
             value = cfg.get("a", {}).get("b", {})
             return value
         """,
@@ -542,14 +530,14 @@ def test_ignore_in_string_ignored(
     monkeypatch.setattr(
         "scb_check.pipeline.run_sg",
         lambda files, rules_path: (
-            _ast_hit(source_file, 3, "chained-dict-get"),
+            _ast_hit(source_file, 3, "json-loads-read"),
         ),
     )
 
     result = analyze_files((source_file,))
 
-    assert tuple(hit.rule_id for hit in result.flags.ast_grep_hits) == (
-        "chained-dict-get",
+    assert tuple(hit.rule_id for hit in result.flags.findings.ast_grep_hits) == (
+        "json-loads-read",
     )
 
 
@@ -566,7 +554,7 @@ def test_ast_ignore_keeps_other_findings(
         "module_c.py",
         """
         def get_cfg_value(cfg):
-            value = cfg.get("a", {}).get("b", {}).get("c")  # scbc ignore[chained-dict-get] legacy payload normalization
+            value = cfg.get("a", {}).get("b", {}).get("c")  # scbc ignore[json-loads-read] legacy payload normalization
             return value
         """,
     )
@@ -574,15 +562,15 @@ def test_ast_ignore_keeps_other_findings(
     monkeypatch.setattr(
         "scb_check.pipeline.run_sg",
         lambda files, rules_path: (
-            _ast_hit(ignored_file, 2, "chained-dict-get"),
+            _ast_hit(ignored_file, 2, "json-loads-read"),
         ),
     )
 
     result = analyze_files((module_a, module_b, ignored_file))
 
-    assert result.flags.ast_grep_hits == ()
-    assert result.flags.clones
-    assert result.flags.high_cc_functions
+    assert result.flags.findings.ast_grep_hits == ()
+    assert result.flags.findings.clones
+    assert result.flags.findings.high_cc_functions
 
 
 def test_detects_cross_file_clones(
@@ -617,49 +605,50 @@ def test_detects_cross_file_clones(
 
     result = analyze_files((first, second))
 
-    clone_files = {clone.file for clone in result.flags.clones}
+    clone_files = {clone.file for clone in result.flags.findings.clones}
     assert clone_files == {first, second}
-    assert {clone.instance_count for clone in result.flags.clones} == {2}
+    assert {clone.instance_count for clone in result.flags.findings.clones} == {2}
 
 
-def test_dataclass_hits_require_density(
+def test_count_threshold_hits_require_density(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Dataclass-count hits are retained only for dense files."""
+    """Count-threshold hits are retained only for dense files."""
     sparse = _write_source(
         tmp_path,
         "sparse.py",
         """
-        from dataclasses import dataclass
-
-        @dataclass
-        class A:
-            x: int
+        def sparse():
+            return None
         """,
     )
     dense = _write_source(
         tmp_path,
         "dense.py",
-        "\n".join(f"@dataclass\nclass C{i}:\n    x: int\n" for i in range(10)),
+        """
+        def first():
+            return None
+
+        def second():
+            return None
+        """,
     )
 
     monkeypatch.setattr(
         "scb_check.pipeline.run_sg",
         lambda files, rules_path: (
-            _ast_hit(sparse, 3, "dataclass-count-explosion"),
-            *(
-                _ast_hit(dense, i * 3 + 1, "dataclass-count-explosion")
-                for i in range(10)
-            ),
+            _ast_hit(sparse, 2, "except-return-static-sentinel"),
+            _ast_hit(dense, 2, "except-return-static-sentinel"),
+            _ast_hit(dense, 5, "except-return-static-sentinel"),
         ),
     )
 
     result = analyze_files((sparse, dense))
 
-    hit_files = {hit.file for hit in result.flags.ast_grep_hits}
+    hit_files = {hit.file for hit in result.flags.findings.ast_grep_hits}
     assert hit_files == {dense}
-    assert len(result.flags.ast_grep_hits) == 10
+    assert len(result.flags.findings.ast_grep_hits) == 2
 
 
 def test_sloc_counts_error_nodes(
@@ -682,7 +671,7 @@ def test_sloc_counts_error_nodes(
 
     result = analyze_files((source_file,))
 
-    assert result.flags.total_loc_by_file == ((source_file, 2),)
+    assert result.flags.lines.total_loc_by_file == ((source_file, 2),)
 
 
 def test_boundary_suppresses_function_hits(
@@ -708,14 +697,52 @@ def test_boundary_suppresses_function_hits(
     monkeypatch.setattr(
         "scb_check.pipeline.run_sg",
         lambda files, rules_path: (
-            _ast_hit(source_file, 3, "chained-dict-get"),
-            _ast_hit(source_file, 7, "chained-dict-get"),
+            _ast_hit(source_file, 3, "json-loads-read"),
+            _ast_hit(source_file, 7, "json-loads-read"),
         ),
     )
 
     result = analyze_files((source_file,))
 
-    assert tuple(hit.line for hit in result.flags.ast_grep_hits) == (7,)
+    assert tuple(hit.line for hit in result.flags.findings.ast_grep_hits) == (7,)
+
+
+def test_info_ast_grep_hits_only_show_with_include_all(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Informational ast-grep hits are hidden unless include_all is enabled."""
+    source_file = _write_source(
+        tmp_path,
+        "sample.py",
+        """
+        def marker(value):
+            return None
+        """,
+    )
+
+    monkeypatch.setattr(
+        "scb_check.pipeline.run_sg",
+        lambda files, rules_path: (
+            _ast_hit(source_file, 2, "redundant-return-none"),
+            _ast_hit(source_file, 2, "json-loads-read"),
+        ),
+    )
+
+    default_result = analyze_files((source_file,))
+    all_result = analyze_files((source_file,), include_all=True)
+
+    assert tuple(hit.rule_id for hit in default_result.flags.findings.ast_grep_hits) == (
+        "json-loads-read",
+    )
+    assert tuple(hit.rule_id for hit in all_result.flags.findings.ast_grep_hits) == (
+        "json-loads-read",
+        "redundant-return-none",
+    )
+    assert tuple(hit.severity for hit in all_result.flags.findings.ast_grep_hits) == (
+        "warning",
+        "info",
+    )
 
 
 def test_include_all_keeps_boundary_hits(
@@ -741,7 +768,7 @@ def test_include_all_keeps_boundary_hits(
 
     result = analyze_files((source_file,), include_all=True)
 
-    assert tuple(hit.line for hit in result.flags.ast_grep_hits) == (3,)
+    assert tuple(hit.line for hit in result.flags.findings.ast_grep_hits) == (3,)
 
 
 def test_include_all_keeps_ignored_hits(
@@ -766,7 +793,7 @@ def test_include_all_keeps_ignored_hits(
 
     result = analyze_files((source_file,), include_all=True)
 
-    assert tuple(hit.rule_id for hit in result.flags.ast_grep_hits) == (
+    assert tuple(hit.rule_id for hit in result.flags.findings.ast_grep_hits) == (
         "chained-dict-get",
     )
 
@@ -793,7 +820,7 @@ def test_include_all_skips_ignore_validation(
 
     result = analyze_files((source_file,), include_all=True)
 
-    assert tuple(hit.rule_id for hit in result.flags.ast_grep_hits) == (
+    assert tuple(hit.rule_id for hit in result.flags.findings.ast_grep_hits) == (
         "chained-dict-get",
     )
 
@@ -824,8 +851,8 @@ def test_flags_high_cognitive_complexity_separately(
 
     result = analyze_files((source_file,))
 
-    assert result.flags.high_cc_functions == ()
-    assert tuple(symbol.name for symbol in result.flags.high_cog_functions) == (
+    assert result.flags.findings.high_cc_functions == ()
+    assert tuple(symbol.name for symbol in result.flags.findings.high_cog_functions) == (
         "nested",
     )
 

@@ -47,6 +47,41 @@ def test_walk_applies_excludes(tmp_path: Path) -> None:
     assert files == ((pkg / "keep.py").resolve(),)
 
 
+def test_walk_applies_gitignore_globs(tmp_path: Path) -> None:
+    """Discovery skips Python files matched by `.gitignore` globs."""
+    root = tmp_path / "repo"
+    generated = root / "generated"
+    pkg = root / "pkg"
+    generated.mkdir(parents=True)
+    pkg.mkdir(parents=True)
+    (root / ".gitignore").write_text(
+        "ignored_*.py\ngenerated/\n",
+        encoding="utf-8",
+    )
+    (root / "ignored_module.py").write_text("x = 1\n", encoding="utf-8")
+    (generated / "skip.py").write_text("y = 1\n", encoding="utf-8")
+    (pkg / "keep.py").write_text("z = 1\n", encoding="utf-8")
+
+    config = Config(exclude=(), base_dir=root)
+    files = tuple(walk_python_files(root, config))
+
+    assert files == ((pkg / "keep.py").resolve(),)
+
+
+def test_walk_applies_gitignore_negation(tmp_path: Path) -> None:
+    """Later `.gitignore` negations re-include matching Python files."""
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / ".gitignore").write_text("ignored_*.py\n!ignored_keep.py\n", encoding="utf-8")
+    (root / "ignored_drop.py").write_text("x = 1\n", encoding="utf-8")
+    (root / "ignored_keep.py").write_text("y = 1\n", encoding="utf-8")
+
+    config = Config(exclude=(), base_dir=root)
+    files = tuple(walk_python_files(root, config))
+
+    assert files == ((root / "ignored_keep.py").resolve(),)
+
+
 def test_walk_missing_path_errors(tmp_path: Path) -> None:
     """Missing discovery paths raise FileNotFoundError."""
     with pytest.raises(FileNotFoundError, match="path does not exist"):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Never
 
@@ -28,8 +29,8 @@ _REPORT_KEYS = {
     "verbosity_flagged_loc",
     "clone_loc",
     "ast_grep_flagged_loc",
-    "trivial_wrapper_loc",
-    "trivial_wrappers",
+    "structural_rule_loc",
+    "structural_rule_findings",
     "total_functions",
     "high_cc_functions",
     "high_cog_functions",
@@ -40,7 +41,7 @@ _REPORT_KEYS = {
 }
 
 
-def _fake_chained_dict_get_hit(
+def _fake_json_loads_read_hit(
     files: tuple[Path, ...],
     _rules_path: Path,
 ) -> tuple[AstGrepHit, ...]:
@@ -52,8 +53,8 @@ def _fake_chained_dict_get_hit(
             end_line=2,
             col=12,
             end_col=48,
-            rule_id="chained-dict-get",
-            matched_text='cfg.get("a", {}).get("b", {}).get("c")',
+            rule_id="json-loads-read",
+            matched_text="json.loads(f.read())",
         ),
     )
 
@@ -129,7 +130,7 @@ def test_check_human_findings(
 
     monkeypatch.setattr(
         "scb_check.pipeline.run_sg",
-        _fake_chained_dict_get_hit,
+        _fake_json_loads_read_hit,
     )
 
     runner = CliRunner()
@@ -140,7 +141,7 @@ def test_check_human_findings(
 
     assert result.exit_code == 0
     assert "duplicate-structure" in result.stdout
-    assert "warning[chained-dict-get]" in result.stdout
+    assert "warning[json-loads-read]" in result.stdout
     assert (
         "erosion: function `complex_route` exceeds complexity threshold"
         in result.stdout
@@ -179,8 +180,8 @@ def test_check_disable_sg_shows_non_sg_findings(
 
     assert result.exit_code == 0
     assert "duplicate-structure:" in result.stdout
-    assert "trivial-wrapper[" in result.stdout
-    assert "warning[chained-dict-get]" not in result.stdout
+    assert "trivial-wrapper[warning]" in result.stdout
+    assert "warning[json-loads-read]" not in result.stdout
     assert "erosion:" in result.stdout
     assert "cog_erosion:" in result.stdout
 
@@ -212,6 +213,7 @@ def test_check_report_allows_disable_sg(
 def test_check_filters_duplicates_by_line_count(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    make_flags: Callable[..., Flags],
 ) -> None:
     """The duplicate line filter hides smaller duplicate groups."""
     source_dir = tmp_path / "project"
@@ -309,7 +311,7 @@ def test_check_filters_duplicates_by_line_count(
         assert not include_all
         assert not disable_sg
         return AnalysisResult(
-            flags=Flags.from_parts(
+            flags=make_flags(
                 clones=[small_a, small_b, large_a, large_b],
                 total_loc_by_file=[(resolved, 16)],
                 clone_sloc_lines_by_file=[
@@ -426,6 +428,19 @@ def test_rule_shows_yaml() -> None:
     assert payload["id"] == "chained-dict-get"
 
 
+def test_rule_shows_structural_metadata() -> None:
+    """Known structural rule IDs print registry metadata."""
+    runner = CliRunner()
+
+    result = runner.invoke(main, ["rule", "trivial-wrapper"])
+
+    assert result.exit_code == 0
+    payload = yaml.safe_load(result.stdout)
+    assert payload["id"] == "trivial-wrapper"
+    assert payload["severity"] == "warning"
+    assert payload["target"] == "symbol"
+
+
 def test_rule_unknown_id() -> None:
     """Unknown rule IDs are rejected."""
     runner = CliRunner()
@@ -439,6 +454,7 @@ def test_rule_unknown_id() -> None:
 def test_check_passes_context(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    make_flags: Callable[..., Flags],
 ) -> None:
     """Config context is passed to rendering."""
     source_dir = tmp_path / "project"
@@ -462,7 +478,7 @@ def test_check_passes_context(
         assert include_all is False
         assert disable_sg is False
         return AnalysisResult(
-            flags=Flags.from_parts(total_loc_by_file=[(resolved, 1)]),
+            flags=make_flags(total_loc_by_file=[(resolved, 1)]),
             source_lines_by_file={resolved: ("x = 1",)},
         )
 
@@ -494,6 +510,7 @@ def test_check_passes_context(
 def test_check_verbosity_sets_logging(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    make_flags: Callable[..., Flags],
 ) -> None:
     """The --verbosity option sets logging verbosity."""
     source_dir = tmp_path / "project"
@@ -517,7 +534,7 @@ def test_check_verbosity_sets_logging(
         assert include_all is False
         assert disable_sg is False
         return AnalysisResult(
-            flags=Flags.from_parts(total_loc_by_file=[(resolved, 1)]),
+            flags=make_flags(total_loc_by_file=[(resolved, 1)]),
             source_lines_by_file={resolved: ("x = 1",)},
         )
 
@@ -561,6 +578,7 @@ def test_check_verbosity_sets_logging(
 def test_check_include_all(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    make_flags: Callable[..., Flags],
 ) -> None:
     """The --include-all flag is passed to analysis."""
     source_dir = tmp_path / "project"
@@ -581,7 +599,7 @@ def test_check_include_all(
         assert include_all is True
         assert disable_sg is False
         return AnalysisResult(
-            flags=Flags.from_parts(total_loc_by_file=[(resolved, 1)]),
+            flags=make_flags(total_loc_by_file=[(resolved, 1)]),
             source_lines_by_file={resolved: ("x = 1",)},
         )
 

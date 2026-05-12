@@ -1,14 +1,17 @@
-# `analysis/` — source → findings
+# `analysis/` — external and parser-native finding helpers
 
-Parses Python source and extracts structural findings. Tree-sitter based, with stdlib-tokenizer modules for SLOC accounting ([`loc.py`](loc.py)) and ast-grep ignore directives ([`ignores.py`](ignores.py)). Function extraction uses a simple tree visitor in [`symbols.py`](symbols.py) to emit Pydantic [`ParsedSymbol`](../models.py) IR objects. [`trivial_wrappers.py`](trivial_wrappers.py) detects removable single-return pass-through functions and function aliases using shared tree-sitter helpers from [`syntax.py`](syntax.py). Pass-through calls must forward parameters to scanned functions. Consumed by [`../pipeline.py`](../pipeline.py).
+This layer keeps analysis that is intentionally separate from generic tree walking:
+
+- [`astgrep.py`](astgrep.py) shells out to the `sg` binary and returns ast-grep hits.
+- [`clones.py`](clones.py) uses parser-native tree-sitter data preserved on parsed file artifacts to hash duplicate syntax blocks.
+
+Source directives, SLOC accounting, parser dispatch, symbol extraction, string-literal helpers, semantic context, and structural rules live under [`../tree_walking/`](../tree_walking/) and [`../rules/`](../rules/), not here.
 
 ## Invariants
 
-- **Line numbers are 1-indexed at the module boundary.** Tree-sitter exposes 0-indexed `.start_point[0]` — always emit `+ 1` when producing a finding.
-- **[`loc.sloc_line_numbers`](loc.py) is the single source of truth for "real" code lines.** It excludes comments, blank lines, and docstrings. Both verbosity intersection and total-LOC derive from it. Do not introduce a second SLOC rule.
-- **Parser is a module-level singleton** in [`parse.py`](parse.py). Don't re-instantiate per file.
-- **Most findings are frozen dataclasses** from [`../models.py`](../models.py); parsed function symbols are frozen Pydantic models. Emit tuples across the module boundary, never lists.
-- **Source directives are comment-token based.** [`ignores.py`](ignores.py) must inspect only `tokenize` comment tokens for `# scbc ignore[...]` and `# scbc boundary`; do not raw-search source text.
+- **Line numbers are 1-indexed at the module boundary.** Tree-sitter exposes 0-indexed `.start_point[0]`; clone findings emit `+ 1`.
+- **Clone line counts use `ParsedFile.module.sloc_lines`.** Do not reintroduce a second SLOC implementation in this layer.
+- **Most findings are frozen dataclasses** from [`../models.py`](../models.py); emit tuples across module boundaries, never lists.
 
 ## Scoring-sensitive surfaces
 
@@ -16,9 +19,6 @@ These drive the verbosity/erosion numbers — change with care:
 
 - `CLONE_NODE_TYPES` in [`clones.py`](clones.py) — which block types get hashed.
 - `_hash_ast_subtree` / `_normalize_ast` — identifier and literal normalization.
-- `CYC_COMPLEXITY_NODE_TYPES` and cognitive-complexity flow-break sets in [`symbols.py`](symbols.py) — which nodes count toward complexity.
-- SLOC exclusion rules in [`loc.py`](loc.py).
-- Trivial-wrapper definition in [`trivial_wrappers.py`](trivial_wrappers.py): removable single-return pass-through functions and aliases to scanned functions, excluding constant returns, external calls, and required API surfaces such as decorators, dunder methods, and inherited methods.
 
 ## ast-grep boundary
 
