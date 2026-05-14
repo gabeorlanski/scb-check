@@ -4,6 +4,14 @@
 
 See [README.md](README.md) for user-facing usage.
 
+See [docs/index.md](docs/index.md) for maintainer guides:
+
+- [Architecture](docs/architecture.md): metrics, pipeline shape, vocabulary, and scoring-sensitive invariants.
+- [Tree walking](docs/tree-walking.md): how source becomes IR, directives, semantic context, and rule inputs.
+- [Development](docs/development.md): current implementation status and common change approaches.
+
+Keep these docs up to date. When behavior, scoring, CLI contracts, source directives, tree walking, structural rules, reporting, or extension points change, update the relevant guide in the same commit.
+
 ## Gotchas (read first)
 
 - **`ty` is the type checker, not mypy.** Run `uv run ty check .`.
@@ -24,7 +32,7 @@ uv run scb-check check .            # ty/ruff like reporting
 uv run vulture
 ```
 
-4. Update any AGENTS.md files for resources you changed.
+4. Update affected documentation and AGENTS.md files. Keep README and `docs/` synchronized with current behavior and approaches.
 
 Single test: `uv run pytest tests/test_cli.py::test_name`.
 
@@ -36,6 +44,7 @@ The package splits into three layers. Before editing in one, read its `AGENTS.md
 - [`src/scb_check/analysis/`](src/scb_check/analysis/AGENTS.md): source → findings (parse, loc, clones, symbols, astgrep)
 - [`src/scb_check/reporting/`](src/scb_check/reporting/AGENTS.md): findings → output (score, render)
 - [`src/scb_check/commands`](src/scb_check/commands/AGENTS.md): the command implementations for the CLI.
+- [`docs/`](docs/AGENTS.md): maintainer guides for architecture, tree walking, development status, and change approaches.
 
 - Top level (boundaries): [`cli.py`](src/scb_check/cli.py), [`pipeline.py`](src/scb_check/pipeline.py), [`config.py`](src/scb_check/config.py), [`walker.py`](src/scb_check/walker.py), [`logging.py`](src/scb_check/logging.py); shared dataclasses in [`models.py`](src/scb_check/models.py).
 

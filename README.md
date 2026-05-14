@@ -151,6 +151,12 @@ Rules:
 - **Extra local slop patterns**: set `SCB_CHECK_EXTRA_SLOP_RULES` to a `:`-separated list of YAML paths to layer additional rules on top of the bundled set.
 - **Complexity**: per-function cyclomatic and cognitive complexity plus SLOC, combined into mass scores for erosion metrics.
 
+## Documentation
+
+- [Docs index](docs/index.md)
+- [Architecture and concepts](docs/architecture.md)
+- [Current status and development approach](docs/development.md)
+
 ## Development
 
 ```bash
