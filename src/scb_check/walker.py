@@ -41,6 +41,29 @@ class _GitIgnoreRule:
     anchored: bool
 
 
+def walk_source_files(
+    path: Path,
+    config: Config,
+    *,
+    include_ignored: bool = False,
+    python_only: bool = False,
+) -> Iterator[Path]:
+    """Yield supported source files after applying discovery excludes.
+
+    When `python_only` is set, only `.py` files are yielded and single-file
+    inputs with another suffix raise ``ValueError("not a Python file: ...")``.
+    """
+    suffixes = _PYTHON_SUFFIXES if python_only else SUPPORTED_SOURCE_SUFFIXES
+    file_kind = "Python" if python_only else "supported source"
+    yield from _walk_supported_files(
+        path,
+        config,
+        include_ignored=include_ignored,
+        suffixes=suffixes,
+        file_kind=file_kind,
+    )
+
+
 def walk_python_files(
     path: Path,
     config: Config,
@@ -48,28 +71,8 @@ def walk_python_files(
     include_ignored: bool = False,
 ) -> Iterator[Path]:
     """Yield Python files under `path` after applying discovery excludes."""
-    yield from _walk_supported_files(
-        path,
-        config,
-        include_ignored=include_ignored,
-        suffixes=_PYTHON_SUFFIXES,
-        file_kind="Python",
-    )
-
-
-def walk_source_files(
-    path: Path,
-    config: Config,
-    *,
-    include_ignored: bool = False,
-) -> Iterator[Path]:
-    """Yield supported source files after applying discovery excludes."""
-    yield from _walk_supported_files(
-        path,
-        config,
-        include_ignored=include_ignored,
-        suffixes=SUPPORTED_SOURCE_SUFFIXES,
-        file_kind="supported source",
+    yield from walk_source_files(
+        path, config, include_ignored=include_ignored, python_only=True,
     )
 
 

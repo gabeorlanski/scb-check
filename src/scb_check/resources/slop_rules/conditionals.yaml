@@ -31,10 +31,10 @@ rule:
 ---
 id: manual-min-max
 language: python
-severity: warning
+severity: info
 message: "Manual min/max `if a > b: m = a else: m = b` - use `m = max(a, b)` / `min(a, b)`"
 metadata:
-  weight: 5
+  weight: 1
   category: slop
 rule:
   kind: if_statement
@@ -275,10 +275,10 @@ rule:
 ---
 id: boolean-return-if-else
 language: python
-severity: warning
+severity: info
 message: "`if c: return True else: return False` - use `return c` (or `return not c`)"
 metadata:
-  weight: 5
+  weight: 1
   category: slop
 rule:
   kind: if_statement
@@ -440,10 +440,10 @@ constraints:
 ---
 id: if-return-bool-else
 language: python
-severity: warning
+severity: info
 message: "`if c: return True else: return False` - use `return bool(c)` or `return c`"
 metadata:
-  weight: 5
+  weight: 1
   category: slop
 rule:
   kind: if_statement
@@ -584,10 +584,10 @@ rule:
 ---
 id: if-pass-else-action
 language: python
-severity: warning
+severity: info
 message: "`if c: pass else: ...` - invert to `if not c: ...`"
 metadata:
-  weight: 5
+  weight: 1
   category: slop
 rule:
   kind: if_statement

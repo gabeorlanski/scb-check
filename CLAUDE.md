@@ -11,7 +11,7 @@ See [README.md](README.md) for user-facing usage.
 ## Gotchas (read first)
 
 - **`ty` is the type checker, not mypy.** Run `uv run ty check .`.
-- **ast-grep subprocess**: `run_sg` shells out to the `sg` binary. Tests monkeypatch `scb_check.pipeline.run_sg` (where it's imported) to avoid this — follow that pattern instead of invoking `sg` in tests.
+- **ast-grep subprocess**: `run_sg` tries a global `sg` binary first, then falls back to package-managed ast-grep executables next to Python if global `sg` is missing or fails. Tests monkeypatch `scb_check.pipeline.run_sg` (where it's imported) to avoid this — follow that pattern instead of invoking `sg` in tests.
 - **Verbosity is a union**, not a sum. Clone lines ∪ ast-grep lines per file, intersected with SLOC lines. Don't double-count.
 - **Dataclasses are `frozen=True, slots=True`** (see [`src/scb_check/models.py`](src/scb_check/models.py)). Pass tuples across module boundaries, not lists.
 

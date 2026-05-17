@@ -86,7 +86,7 @@ def test_check_report_json(
         ],
     )
 
-    assert result.exit_code == 0
+    assert result.exit_code == 1
     payload = json.loads(result.stdout)
     assert payload.keys() == _REPORT_KEYS
 
@@ -116,7 +116,7 @@ def test_check_output_format_json(
         ],
     )
 
-    assert result.exit_code == 0
+    assert result.exit_code == 1
     payload = json.loads(result.stdout)
     assert payload.keys() == _REPORT_KEYS
 
@@ -142,7 +142,7 @@ def test_check_human_findings(
         ["check", "--config", str(config_override), str(corpus)],
     )
 
-    assert result.exit_code == 0
+    assert result.exit_code == 1
     assert "duplicate-structure" in result.stdout
     assert "warning[json-loads-read]" in result.stdout
     assert (
@@ -181,7 +181,7 @@ def test_check_disable_sg_shows_non_sg_findings(
         ],
     )
 
-    assert result.exit_code == 0
+    assert result.exit_code == 1
     assert "duplicate-structure:" in result.stdout
     assert "trivial-wrapper[warning]" in result.stdout
     assert "warning[json-loads-read]" not in result.stdout
@@ -378,7 +378,7 @@ def test_check_filters_duplicates_by_line_count(
         ["check", "--min-duplicate-lines", "5", str(source_dir)],
     )
 
-    assert result.exit_code == 0
+    assert result.exit_code == 1
     assert "def large_first" in result.stdout
     assert "def large_second" in result.stdout
     assert "def small_first" not in result.stdout
@@ -688,3 +688,175 @@ def test_check_reports_ignore_errors(
         "sample.py:12: scbc ignore requires at least one rule id"
         in result.output
     )
+
+
+def test_check_exits_zero_when_no_findings(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    make_flags: Callable[..., Flags],
+) -> None:
+    """A clean codebase exits zero."""
+    source_dir = tmp_path / "project"
+    source_dir.mkdir()
+    source_file = source_dir / "ok.py"
+    source_file.write_text("x = 1\n", encoding="utf-8")
+    resolved = source_file.resolve()
+
+    def fake_analyze(
+        _path: Path,
+        _config: Config,
+        *,
+        include_all: bool = False,
+        disable_sg: bool = False,
+    ) -> AnalysisResult:
+        del include_all, disable_sg
+        return AnalysisResult(
+            flags=make_flags(total_loc_by_file=[(resolved, 1)]),
+            source_lines_by_file={resolved: ("x = 1",)},
+        )
+
+    monkeypatch.setattr("scb_check.commands.check.analyze", fake_analyze)
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["check", str(source_dir)])
+
+    assert result.exit_code == 0
+
+
+def test_check_exits_nonzero_when_clones_exist(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    make_flags: Callable[..., Flags],
+) -> None:
+    """A clone finding causes a non-zero exit."""
+    source_dir = tmp_path / "project"
+    source_dir.mkdir()
+    source_file = source_dir / "ok.py"
+    source_file.write_text("x = 1\n", encoding="utf-8")
+    resolved = source_file.resolve()
+    clone = CloneBlock(
+        file=resolved,
+        start_line=1,
+        end_line=1,
+        group_hash="h",
+        instance_count=2,
+        other_instances=((resolved, 1),),
+        first_lines=("x = 1",),
+    )
+
+    def fake_analyze(
+        _path: Path,
+        _config: Config,
+        *,
+        include_all: bool = False,
+        disable_sg: bool = False,
+    ) -> AnalysisResult:
+        del include_all, disable_sg
+        return AnalysisResult(
+            flags=make_flags(
+                clones=[clone],
+                total_loc_by_file=[(resolved, 1)],
+                clone_sloc_lines_by_file=[(resolved, {1})],
+            ),
+            source_lines_by_file={resolved: ("x = 1",)},
+        )
+
+    monkeypatch.setattr("scb_check.commands.check.analyze", fake_analyze)
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["check", str(source_dir)])
+
+    assert result.exit_code == 1
+
+
+def test_check_exits_nonzero_when_ast_hits_exist(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    make_flags: Callable[..., Flags],
+) -> None:
+    """An ast-grep finding causes a non-zero exit."""
+    source_dir = tmp_path / "project"
+    source_dir.mkdir()
+    source_file = source_dir / "ok.py"
+    source_file.write_text("x = 1\n", encoding="utf-8")
+    resolved = source_file.resolve()
+    hit = AstGrepHit(
+        file=resolved,
+        line=1,
+        end_line=1,
+        col=0,
+        end_col=5,
+        rule_id="r",
+        matched_text="x = 1",
+    )
+
+    def fake_analyze(
+        _path: Path,
+        _config: Config,
+        *,
+        include_all: bool = False,
+        disable_sg: bool = False,
+    ) -> AnalysisResult:
+        del include_all, disable_sg
+        return AnalysisResult(
+            flags=make_flags(
+                ast_grep_hits=[hit],
+                total_loc_by_file=[(resolved, 1)],
+            ),
+            source_lines_by_file={resolved: ("x = 1",)},
+        )
+
+    monkeypatch.setattr("scb_check.commands.check.analyze", fake_analyze)
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["check", str(source_dir)])
+
+    assert result.exit_code == 1
+
+
+def test_check_json_report_exits_nonzero_when_findings_exist(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    make_flags: Callable[..., Flags],
+) -> None:
+    """The JSON report path also exits non-zero when findings exist."""
+    source_dir = tmp_path / "project"
+    source_dir.mkdir()
+    source_file = source_dir / "ok.py"
+    source_file.write_text("x = 1\n", encoding="utf-8")
+    resolved = source_file.resolve()
+    clone = CloneBlock(
+        file=resolved,
+        start_line=1,
+        end_line=1,
+        group_hash="h",
+        instance_count=2,
+        other_instances=((resolved, 1),),
+        first_lines=("x = 1",),
+    )
+
+    def fake_analyze(
+        _path: Path,
+        _config: Config,
+        *,
+        include_all: bool = False,
+        disable_sg: bool = False,
+    ) -> AnalysisResult:
+        del include_all, disable_sg
+        return AnalysisResult(
+            flags=make_flags(
+                clones=[clone],
+                total_loc_by_file=[(resolved, 1)],
+                clone_sloc_lines_by_file=[(resolved, {1})],
+            ),
+            source_lines_by_file={resolved: ("x = 1",)},
+        )
+
+    monkeypatch.setattr("scb_check.commands.check.analyze", fake_analyze)
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["check", "--report", str(source_dir)])
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload.keys() == _REPORT_KEYS

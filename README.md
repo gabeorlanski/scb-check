@@ -42,6 +42,8 @@ uv export --format requirements.txt --no-dev --no-emit-project --frozen --output
 uv export --format requirements.txt --all-groups --no-emit-project --frozen --output-file requirements-dev.lock
 ```
 
+`scb-check` runs bundled ast-grep rules by trying a global `sg` executable first. If global `sg` is missing or fails, it falls back to the `ast-grep-cli` executable installed with `scb-check`.
+
 ## Usage
 
 ```bash
@@ -64,6 +66,10 @@ scb-check rule RULE_ID                  # print YAML or metadata for a specific 
 `verbosity`, `erosion`, `cog_erosion`, `files_scanned`, `total_loc`, `verbosity_flagged_loc`, `clone_loc`, `ast_grep_flagged_loc`, `structural_rule_loc`, `structural_rule_findings`, `total_functions`, `high_cc_functions`, `high_cog_functions`, `total_mass`, `high_cc_mass`, `total_cog_mass`, `high_cog_mass`, `syntax_tree_count`, `syntax_node_count`, and `syntax_by_language`.
 
 `syntax_by_language` is keyed by language value and reports `tree_count` plus total Tree-sitter `node_count` for parsed files in that language.
+
+### Exit codes
+
+`scb-check check` exits `0` when no findings are reported, `1` when any finding is present (clones, ast-grep hits, structural findings, or high-complexity functions), and `2` for usage errors (bad path, missing config, invalid directives).
 
 ## Configuration
 

@@ -19,6 +19,22 @@ from tree_sitter import Parser
 
 from scb_check.tree_walking.artifacts import LanguageParseError
 from scb_check.tree_walking.artifacts import ParsedFile
+from scb_check.tree_walking.languages._node_helpers import (
+    count_sloc_in_span as _count_sloc_in_span,
+)
+from scb_check.tree_walking.languages._node_helpers import (
+    iter_nodes as _iter_nodes,
+)
+from scb_check.tree_walking.languages._node_helpers import (
+    module_span as _module_span,
+)
+from scb_check.tree_walking.languages._node_helpers import (
+    node_span as _node_span,
+)
+from scb_check.tree_walking.languages._node_helpers import (
+    qualified_name as _qualified_name,
+)
+from scb_check.tree_walking.languages._node_helpers import text as _text
 from scb_check.tree_walking.models import ImportIR
 from scb_check.tree_walking.models import Language
 from scb_check.tree_walking.models import ModuleIR
@@ -26,7 +42,6 @@ from scb_check.tree_walking.models import OperationIR
 from scb_check.tree_walking.models import OperationKind
 from scb_check.tree_walking.models import ReferenceIR
 from scb_check.tree_walking.models import SignatureIR
-from scb_check.tree_walking.models import SourceSpan
 from scb_check.tree_walking.models import SymbolIR
 from scb_check.tree_walking.models import SymbolKind
 from scb_check.tree_walking.models import SymbolRole
@@ -370,44 +385,6 @@ def _get_parser() -> Parser:
     return _PARSER
 
 
-def _module_span(file_path: Path, source_lines: list[str]) -> SourceSpan:
-    if not source_lines:
-        return SourceSpan(
-            file=file_path,
-            start_line=1,
-            start_col=0,
-            end_line=1,
-            end_col=0,
-        )
-    return SourceSpan(
-        file=file_path,
-        start_line=1,
-        start_col=0,
-        end_line=len(source_lines),
-        end_col=len(source_lines[-1]),
-    )
-
-
-def _node_span(file_path: Path, node: Node) -> SourceSpan:
-    return SourceSpan(
-        file=file_path,
-        start_line=node.start_point[0] + 1,
-        start_col=node.start_point[1],
-        end_line=node.end_point[0] + 1,
-        end_col=node.end_point[1],
-    )
-
-
-def _qualified_name(
-    module_name: str,
-    owner_qualified_name: str | None,
-    name: str,
-) -> str:
-    if owner_qualified_name is None:
-        return f"{module_name}.{name}"
-    return f"{owner_qualified_name}.{name}"
-
-
 def _module_name_for_path(path: Path) -> str:
     package_parts = _package_parts(path.parent)
     if path.name == "__init__.py":
@@ -422,21 +399,6 @@ def _package_parts(directory: Path) -> tuple[str, ...]:
         parts.append(current.name)
         current = current.parent
     return tuple(reversed(parts))
-
-
-def _iter_nodes(node: Node) -> tuple[Node, ...]:
-    nodes: list[Node] = []
-    stack = [node]
-    while stack:
-        current = stack.pop()
-        nodes.append(current)
-        stack.extend(reversed(current.children))
-    return tuple(nodes)
-
-
-def _text(node: Node) -> str:
-    source = node.text or b""
-    return source.decode("utf-8")
 
 
 def _name_from_node(node: Node) -> str | None:
@@ -502,12 +464,6 @@ def python_string_prefix(literal: str) -> str:
             break
         prefix_chars.append(character.lower())
     return "".join(prefix_chars)
-
-
-def _count_sloc_in_span(node: Node, sloc_lines: frozenset[int]) -> int:
-    start_line = node.start_point[0] + 1
-    end_line = node.end_point[0] + 1
-    return sum(1 for line_no in sloc_lines if start_line <= line_no <= end_line)
 
 
 def _sloc_line_numbers(source: str, tree: Tree) -> frozenset[int]:

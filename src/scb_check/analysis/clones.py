@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 from dataclasses import dataclass
 from itertools import groupby
 from operator import attrgetter
@@ -295,28 +296,30 @@ def _normalizable_children(
     )
 
 
-def _clone_node_types(language: Language) -> frozenset[str]:
+def _python_or_registry(
+    language: Language,
+    python_value: frozenset[str],
+    registry_getter: Callable[[Language], frozenset[str]],
+) -> frozenset[str]:
     if language is Language.PYTHON:
-        return CLONE_NODE_TYPES
-    return clone_node_types_for_language(language)
+        return python_value
+    return registry_getter(language)
+
+
+def _clone_node_types(language: Language) -> frozenset[str]:
+    return _python_or_registry(language, CLONE_NODE_TYPES, clone_node_types_for_language)
 
 
 def _comment_node_types(language: Language) -> frozenset[str]:
-    if language is Language.PYTHON:
-        return frozenset({"comment"})
-    return comment_node_types_for_language(language)
+    return _python_or_registry(language, frozenset({"comment"}), comment_node_types_for_language)
 
 
 def _identifier_node_types(language: Language) -> frozenset[str]:
-    if language is Language.PYTHON:
-        return frozenset({"identifier"})
-    return identifier_node_types_for_language(language)
+    return _python_or_registry(language, frozenset({"identifier"}), identifier_node_types_for_language)
 
 
 def _literal_node_types(language: Language) -> frozenset[str]:
-    if language is Language.PYTHON:
-        return frozenset(_PYTHON_LITERAL_TOKENS)
-    return literal_node_types_for_language(language)
+    return _python_or_registry(language, frozenset(_PYTHON_LITERAL_TOKENS), literal_node_types_for_language)
 
 
 def _literal_token(node_type: str, language: Language) -> str:

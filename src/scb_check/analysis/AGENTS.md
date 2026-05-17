@@ -22,4 +22,4 @@ These drive the verbosity/erosion numbers — change with care:
 
 ## ast-grep boundary
 
-[`astgrep.run_sg`](astgrep.py) shells out to the `sg` binary. It returns `()` on missing binary, OSError, non-zero exit, or unparseable JSON — it **never raises**. That's deliberate: a missing `sg` degrades gracefully rather than failing the run. Tests monkeypatch `scb_check.pipeline.run_sg` (where it's imported) rather than the subprocess itself.
+[`astgrep.run_sg`](astgrep.py) tries a global `sg` binary first, then falls back to package-managed ast-grep executables next to Python if global `sg` is missing or fails. It returns `()` when no binary succeeds, OSError persists, all exits are non-zero, or JSON is unparseable — it **never raises**. That's deliberate: a missing ast-grep binary degrades gracefully rather than failing the run. Tests monkeypatch `scb_check.pipeline.run_sg` (where it's imported) rather than the subprocess itself.

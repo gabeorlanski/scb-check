@@ -12,9 +12,12 @@ import click
 import typer
 from typer.core import TyperCommand
 
+from scb_check.config import Config
 from scb_check.config import ConfigError
 from scb_check.config import load_config
 from scb_check.logging import configure_logging
+from scb_check.models import Flags
+from scb_check.pipeline import AnalysisResult
 from scb_check.pipeline import IgnoreDirectiveError
 from scb_check.pipeline import analyze
 from scb_check.reporting.render import render_flags
@@ -180,14 +183,36 @@ def check(
     ] = False,
 ) -> None:
     """Run analysis for `path` and emit the selected output format."""
+    output_format = _resolve_output_or_exit(ctx)
+    configure_logging(verbosity)
+    config, result = _load_and_analyze(ctx, path, config_path, include_all=include_all)
+    _ensure_files_parsed(result, path)
+
+    flags = result.flags
+    if output_format == "json":
+        _emit_json(flags)
+    else:
+        _emit_human(flags, result.source_lines_by_file, config, _min_duplicate_lines(ctx))
+
+    if _has_findings(flags):
+        raise typer.Exit(code=1)
+
+
+def _resolve_output_or_exit(ctx: typer.Context) -> Literal["human", "json"]:
     try:
-        output_format = _resolve_output(ctx)
+        return _resolve_output(ctx)
     except ValueError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from exc
 
-    configure_logging(verbosity)
 
+def _load_and_analyze(
+    ctx: typer.Context,
+    path: Path,
+    config_path: Path | None,
+    *,
+    include_all: bool,
+) -> tuple[Config, AnalysisResult]:
     try:
         config = load_config(config_path, Path.cwd())
         result = analyze(
@@ -199,30 +224,45 @@ def check(
     except (ConfigError, IgnoreDirectiveError, OSError, ValueError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from exc
+    return config, result
 
+
+def _ensure_files_parsed(result: AnalysisResult, path: Path) -> None:
     if not result.flags.lines.total_loc_by_file:
         typer.echo(f"no supported source files could be parsed at {path}", err=True)
         raise typer.Exit(code=2)
 
-    if output_format == "json":
-        report_payload = compute_report(result.flags)
-        json.dump(report_payload.to_dict(), sys.stdout)
-        return
 
-    flags = result.flags
-    min_duplicate_lines = _min_duplicate_lines(ctx)
-    if min_duplicate_lines is None:
-        output = render_flags(
-            flags,
-            result.source_lines_by_file,
-            context_lines=config.context_lines,
-        )
-    else:
-        output = render_flags(
-            flags,
-            result.source_lines_by_file,
-            context_lines=config.context_lines,
-            min_duplicate_lines=min_duplicate_lines,
-        )
+def _emit_json(flags: Flags) -> None:
+    report_payload = compute_report(flags)
+    json.dump(report_payload.to_dict(), sys.stdout)
+
+
+def _emit_human(
+    flags: Flags,
+    source_lines_by_file: dict[Path, tuple[str, ...]],
+    config: Config,
+    min_duplicate_lines: int | None,
+) -> None:
+    render_kwargs: dict[str, int] = {}
+    if min_duplicate_lines is not None:
+        render_kwargs["min_duplicate_lines"] = min_duplicate_lines
+    output = render_flags(
+        flags,
+        source_lines_by_file,
+        context_lines=config.context_lines,
+        **render_kwargs,
+    )
     if output:
         typer.echo(output)
+
+
+def _has_findings(flags: Flags) -> bool:
+    findings = flags.findings
+    return bool(
+        findings.clones
+        or findings.ast_grep_hits
+        or findings.structural_findings
+        or findings.high_cc_functions
+        or findings.high_cog_functions,
+    )

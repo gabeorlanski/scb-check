@@ -16,30 +16,40 @@ from scb_check.models import AstGrepSeverity
 
 logger = get_logger(__name__)
 
-_AST_GREP_BINARIES = ("ast-grep", "sg")
+_PYTHON_ENV_AST_GREP_BINARIES = ("sg", "ast-grep")
 
 
 def run_sg(files: tuple[Path, ...], rules_path: Path) -> tuple[AstGrepHit, ...]:
-    """Invoke the ``sg`` binary against ``files`` using ``rules_path``.
+    """Invoke ast-grep against ``files`` using ``rules_path``.
 
-    Returns an empty tuple — never raises — when the binary is missing,
-    the subprocess fails, the exit code is non-zero, or the JSON payload
-    is unparseable. A missing ``sg`` is treated as a degraded run, not a
+    A global ``sg`` executable is tried first; package-managed executables
+    next to the current Python interpreter are retried if global ``sg`` is
+    missing or fails. Returns an empty tuple — never raises — when no
+    binary succeeds, subprocess execution fails, all exits are non-zero,
+    or the JSON payload is unparseable. A missing binary is treated as a
     hard failure, so scb-check still produces clone and erosion numbers.
     Line and column numbers in the returned hits are 1-indexed.
     """
-    command = _command(files, rules_path)
-    if command is None:
-        return ()
+    commands = _commands(files, rules_path)
+    last_failure: subprocess.CompletedProcess[str] | OSError | None = None
+    for command in commands:
+        result = _run_command(command)
+        if isinstance(result, OSError):
+            last_failure = result
+            continue
 
-    result = _run_command(command)
-    if result is None:
-        return ()
+        if result.returncode == 0:
+            return _parse_hits(result.stdout)
 
-    return _parse_hits(result.stdout)
+        last_failure = result
+
+    if last_failure is not None:
+        _log_run_failure(last_failure)
+
+    return ()
 
 
-def _command(files: tuple[Path, ...], rules_path: Path) -> list[str] | None:
+def _commands(files: tuple[Path, ...], rules_path: Path) -> tuple[tuple[str, ...], ...]:
     if not files or not rules_path.exists():
         logger.warning(
             "no files to scan or rules file missing",
@@ -47,33 +57,38 @@ def _command(files: tuple[Path, ...], rules_path: Path) -> list[str] | None:
             rules_path=rules_path,
             rules_exists=rules_path.exists(),
         )
-        return None
+        return ()
 
-    ast_grep_binary = _ast_grep_binary()
-    if ast_grep_binary is None:
+    ast_grep_binaries = _ast_grep_binaries()
+    if not ast_grep_binaries:
         logger.warning("ast-grep binary not found", binary="ast-grep")
-        return None
+        return ()
 
-    return [
-        ast_grep_binary,
-        "scan",
-        "--json=stream",
-        "-r",
-        str(rules_path),
-        *[str(path) for path in files],
-    ]
+    return tuple(
+        (
+            binary,
+            "scan",
+            "--json=stream",
+            "-r",
+            str(rules_path),
+            *[str(path) for path in files],
+        )
+        for binary in ast_grep_binaries
+    )
 
 
-def _ast_grep_binary() -> str | None:
-    for binary in _AST_GREP_BINARIES:
+def _ast_grep_binaries() -> tuple[str, ...]:
+    binaries: list[str] = []
+    if (global_sg := shutil.which("sg")) is not None:
+        binaries.append(global_sg)
+
+    for binary in _PYTHON_ENV_AST_GREP_BINARIES:
         if (candidate := _python_env_executable(binary)) is not None:
-            return str(candidate)
+            candidate_text = str(candidate)
+            if candidate_text not in binaries:
+                binaries.append(candidate_text)
 
-    for binary in _AST_GREP_BINARIES:
-        if (candidate := shutil.which(binary)) is not None:
-            return candidate
-
-    return None
+    return tuple(binaries)
 
 
 def _python_env_executable(binary: str) -> Path | None:
@@ -84,27 +99,30 @@ def _python_env_executable(binary: str) -> Path | None:
     return None
 
 
-def _run_command(command: list[str]) -> subprocess.CompletedProcess[str] | None:
+def _run_command(
+    command: tuple[str, ...],
+) -> subprocess.CompletedProcess[str] | OSError:
     try:
-        result = subprocess.run(  # noqa: S603
+        return subprocess.run(  # noqa: S603
             command,
             capture_output=True,
             text=True,
             check=False,
         )
     except OSError as exc:
-        logger.warning("failed to execute ast-grep", error=str(exc))
-        return None
+        return exc
 
-    if result.returncode == 0:
-        return result
+
+def _log_run_failure(failure: subprocess.CompletedProcess[str] | OSError) -> None:
+    if isinstance(failure, OSError):
+        logger.warning("failed to execute ast-grep", error=str(failure))
+        return
 
     logger.warning(
         "ast-grep returned non-zero",
-        returncode=result.returncode,
-        stderr=result.stderr.strip(),
+        returncode=failure.returncode,
+        stderr=failure.stderr.strip(),
     )
-    return None  # scbc ignore[redundant-return-none]
 
 
 def _parse_hits(stdout: str) -> tuple[AstGrepHit, ...]:

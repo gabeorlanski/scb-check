@@ -13,10 +13,25 @@ from tree_sitter import Parser
 
 from scb_check.tree_walking.artifacts import LanguageParseError
 from scb_check.tree_walking.artifacts import ParsedFile
+from scb_check.tree_walking.languages._node_helpers import (
+    count_sloc_in_span as _count_sloc_in_span,
+)
+from scb_check.tree_walking.languages._node_helpers import (
+    iter_nodes as _iter_nodes,
+)
+from scb_check.tree_walking.languages._node_helpers import (
+    module_span as _module_span,
+)
+from scb_check.tree_walking.languages._node_helpers import (
+    node_span as _node_span,
+)
+from scb_check.tree_walking.languages._node_helpers import (
+    qualified_name as _qualified_name,
+)
+from scb_check.tree_walking.languages._node_helpers import text as _text
 from scb_check.tree_walking.models import Language
 from scb_check.tree_walking.models import ModuleIR
 from scb_check.tree_walking.models import SignatureIR
-from scb_check.tree_walking.models import SourceSpan
 from scb_check.tree_walking.models import SymbolIR
 from scb_check.tree_walking.models import SymbolKind
 
@@ -205,6 +220,19 @@ class GenericTreeSitterWalker:
         for child in node.named_children:
             self._visit_node(child, context, ancestors)
 
+    def _resolve_qualified_name(
+        self,
+        name: str | None,
+        node: Node,
+        context: VisitContext,
+        ancestors: tuple[Node, ...],
+    ) -> tuple[str, str] | None:
+        """Resolve `name` into a `(name, qualified_name)` pair or fall through to children."""
+        if name is None:
+            self._visit_children(node, context, ancestors)
+            return None
+        return name, _qualified_name(self._module_name, context.owner_qualified_name, name)
+
     def _visit_node(
         self,
         node: Node,
@@ -212,16 +240,15 @@ class GenericTreeSitterWalker:
         ancestors: tuple[Node, ...],
     ) -> None:
         node_ancestors = (*ancestors, node)
-        if node.type in self._config.class_node_types:
+        config = self._config
+        if node.type in config.class_node_types:
             self._handle_class(node, context, node_ancestors)
-            return
-        if node.type in self._config.owner_context_node_types:
+        elif node.type in config.owner_context_node_types:
             self._handle_owner_context(node, context, node_ancestors)
-            return
-        if node.type in self._config.function_node_types:
+        elif node.type in config.function_node_types:
             self._handle_function(node, context, ancestors, node_ancestors)
-            return
-        self._visit_children(node, context, node_ancestors)
+        else:
+            self._visit_children(node, context, node_ancestors)
 
     def _handle_class(
         self,
@@ -229,16 +256,16 @@ class GenericTreeSitterWalker:
         context: VisitContext,
         ancestors: tuple[Node, ...],
     ) -> None:
-        name = _first_identifier_text(node, self._config.identifier_node_types)
-        if name is None:
-            self._visit_children(node, context, ancestors)
-            return
-
-        qualified_name = _qualified_name(
-            self._module_name,
-            context.owner_qualified_name,
-            name,
+        resolved = self._resolve_qualified_name(
+            _first_identifier_text(node, self._config.identifier_node_types),
+            node,
+            context,
+            ancestors,
         )
+        if resolved is None:
+            return
+        name, qualified_name = resolved
+
         class_symbol = SymbolIR(
             name=name,
             qualified_name=qualified_name,
@@ -265,15 +292,15 @@ class GenericTreeSitterWalker:
         context: VisitContext,
         ancestors: tuple[Node, ...],
     ) -> None:
-        name = _owner_context_name(node, self._config.identifier_node_types)
-        if name is None:
-            self._visit_children(node, context, ancestors)
-            return
-        qualified_name = _qualified_name(
-            self._module_name,
-            context.owner_qualified_name,
-            name,
+        resolved = self._resolve_qualified_name(
+            _owner_context_name(node, self._config.identifier_node_types),
+            node,
+            context,
+            ancestors,
         )
+        if resolved is None:
+            return
+        _, qualified_name = resolved
         self._visit_children(
             node,
             VisitContext(
@@ -290,16 +317,16 @@ class GenericTreeSitterWalker:
         ancestors: tuple[Node, ...],
         node_ancestors: tuple[Node, ...],
     ) -> None:
-        name = _function_name(node, ancestors, self._config)
-        if name is None:
-            self._visit_children(node, context, node_ancestors)
-            return
-
-        qualified_name = _qualified_name(
-            self._module_name,
-            context.owner_qualified_name,
-            name,
+        resolved = self._resolve_qualified_name(
+            _function_name(node, ancestors, self._config),
+            node,
+            context,
+            node_ancestors,
         )
+        if resolved is None:
+            return
+        name, qualified_name = resolved
+
         kind = (
             SymbolKind.METHOD
             if context.class_context is not None
@@ -333,61 +360,8 @@ class GenericTreeSitterWalker:
         )
 
 
-def _module_span(file_path: Path, source_lines: list[str]) -> SourceSpan:
-    if not source_lines:
-        return SourceSpan(
-            file=file_path,
-            start_line=1,
-            start_col=0,
-            end_line=1,
-            end_col=0,
-        )
-    return SourceSpan(
-        file=file_path,
-        start_line=1,
-        start_col=0,
-        end_line=len(source_lines),
-        end_col=len(source_lines[-1]),
-    )
-
-
-def _node_span(file_path: Path, node: Node) -> SourceSpan:
-    return SourceSpan(
-        file=file_path,
-        start_line=node.start_point[0] + 1,
-        start_col=node.start_point[1],
-        end_line=node.end_point[0] + 1,
-        end_col=node.end_point[1],
-    )
-
-
-def _qualified_name(
-    module_name: str,
-    owner_qualified_name: str | None,
-    name: str,
-) -> str:
-    if owner_qualified_name is None:
-        return f"{module_name}.{name}"
-    return f"{owner_qualified_name}.{name}"
-
-
 def _module_name_for_path(path: Path) -> str:
     return path.name.removesuffix("".join(path.suffixes)) or path.stem
-
-
-def _iter_nodes(node: Node) -> tuple[Node, ...]:
-    nodes: list[Node] = []
-    stack = [node]
-    while stack:
-        current = stack.pop()
-        nodes.append(current)
-        stack.extend(reversed(current.children))
-    return tuple(nodes)
-
-
-def _text(node: Node) -> str:
-    source = node.text or b""
-    return source.decode("utf-8")
 
 
 def _first_identifier_text(
@@ -531,12 +505,6 @@ def _parameter_names_from_node(node: Node) -> tuple[str, ...]:
         for child in _iter_nodes(node)
         if child.type in _PARAMETER_IDENTIFIER_NODE_TYPES
     )
-
-
-def _count_sloc_in_span(node: Node, sloc_lines: frozenset[int]) -> int:
-    start_line = node.start_point[0] + 1
-    end_line = node.end_point[0] + 1
-    return sum(1 for line_no in sloc_lines if start_line <= line_no <= end_line)
 
 
 def _sloc_line_numbers(

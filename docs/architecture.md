@@ -101,7 +101,7 @@ CLI (`cli.py` / `commands/`)
 - Supported scan targets are Python (`.py`, `.pyw`), Rust (`.rs`), JavaScript (`.js`, `.mjs`, `.cjs`), TypeScript (`.ts`), Zig (`.zig`), Haskell (`.hs`), and C++ (`.cpp`, `.cc`, `.cxx`, `.c++`, `.hpp`, `.hh`, `.hxx`).
 - `ast-grep`, structural rules, and source directives are Python-only until language-specific rule sets exist.
 - Parser-native data may live on parsed file artifacts for clone detection, but not in `ModuleIR`, `ProjectIR`, or structural rules.
-- `ast-grep` failure is non-fatal. A missing `sg` binary, `OSError`, non-zero exit, or invalid JSON returns no hits.
+- `ast-grep` failure is non-fatal. `scb-check` tries a global `sg` binary first, then falls back to package-managed ast-grep executables next to Python if global `sg` is missing or fails. If no ast-grep binary succeeds, `OSError`, non-zero exits, or invalid JSON return no hits.
 - Source ignores and structural rules share one rule ID namespace, so `scbc ignore[...]` is never ambiguous.
 - Clone and erosion findings are not suppressible. `ast-grep` and structural findings are suppressible.
 - Immutable records cross module boundaries: frozen dataclasses and Pydantic models, with tuples instead of lists.
