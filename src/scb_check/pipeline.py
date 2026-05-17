@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from dataclasses import replace
 from pathlib import Path
 
+from tree_sitter import Tree
+
 from scb_check.analysis.astgrep import run_sg
 from scb_check.analysis.clones import detect_clones
 from scb_check.config import Config
@@ -18,6 +20,7 @@ from scb_check.models import CloneBlock
 from scb_check.models import FileLineSet
 from scb_check.models import FindingGroups
 from scb_check.models import Flags
+from scb_check.models import LanguageSyntaxSummary
 from scb_check.models import LineGroups
 from scb_check.resources import RuleSeverity
 from scb_check.resources import load_rule_severities
@@ -36,11 +39,12 @@ from scb_check.tree_walking.dispatch import ProjectParseError
 from scb_check.tree_walking.dispatch import (
     parse_source_file as dispatch_parse_source_file,
 )
+from scb_check.tree_walking.models import Language
 from scb_check.tree_walking.models import RuleFinding
 from scb_check.tree_walking.models import SymbolIR
 from scb_check.tree_walking.models import SymbolKind
 from scb_check.tree_walking.semantic import build_project
-from scb_check.walker import walk_python_files
+from scb_check.walker import walk_source_files
 
 logger = get_logger(__name__)
 
@@ -64,6 +68,8 @@ class ParsedSources:
     sloc_lines_by_file: dict[Path, frozenset[int]]
     source_by_file: dict[Path, str]
     source_lines_by_file: dict[Path, tuple[str, ...]]
+    language_by_file: dict[Path, Language]
+    syntax_by_language: tuple[LanguageSyntaxSummary, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +83,7 @@ class Findings:
     total_loc_by_file: tuple[tuple[Path, int], ...]
     sloc_lines_by_file: dict[Path, frozenset[int]]
     source_lines_by_file: dict[Path, tuple[str, ...]]
+    syntax_by_language: tuple[LanguageSyntaxSummary, ...]
 
 
 def analyze(
@@ -86,10 +93,10 @@ def analyze(
     include_all: bool = False,
     disable_sg: bool = False,
 ) -> AnalysisResult:
-    """Analyze Python files under `path` using `config`."""
-    files = tuple(sorted(walk_python_files(path, config, include_ignored=include_all)))
+    """Analyze supported source files under `path` using `config`."""
+    files = tuple(sorted(walk_source_files(path, config, include_ignored=include_all)))
     if not files:
-        raise FileNotFoundError(f"no Python files found at {path}")
+        raise FileNotFoundError(f"no supported source files found at {path}")
     return analyze_files(files, include_all=include_all, disable_sg=disable_sg)
 
 
@@ -99,7 +106,7 @@ def analyze_files(
     include_all: bool = False,
     disable_sg: bool = False,
 ) -> AnalysisResult:
-    """Analyze an explicit tuple of Python `files`."""
+    """Analyze an explicit tuple of supported source `files`."""
     findings = _collect_findings(
         files,
         include_all=include_all,
@@ -137,6 +144,7 @@ def _collect_findings(
         total_loc_by_file=sources.total_loc_by_file,
         sloc_lines_by_file=sources.sloc_lines_by_file,
         source_lines_by_file=sources.source_lines_by_file,
+        syntax_by_language=sources.syntax_by_language,
     )
 
 
@@ -146,16 +154,24 @@ def _parse_sources(files: tuple[Path, ...]) -> ParsedSources:
     sloc_lines_by_file: dict[Path, frozenset[int]] = {}
     source_by_file: dict[Path, str] = {}
     source_lines_by_file: dict[Path, tuple[str, ...]] = {}
+    language_by_file: dict[Path, Language] = {}
+    tree_counts: Counter[Language] = Counter()
+    node_counts: Counter[Language] = Counter()
 
     for file_path in files:
         if (parsed_source := _parse_source_file(file_path)) is None:
             continue
         source, parsed = parsed_source
+        language = parsed.module.language
         parsed_files.append(parsed)
         source_by_file[file_path] = source
         source_lines_by_file[file_path] = tuple(source.splitlines())
         sloc_lines_by_file[file_path] = parsed.module.sloc_lines
+        language_by_file[file_path] = language
         total_loc_by_file.append((file_path, len(parsed.module.sloc_lines)))
+        if isinstance(parsed.native_tree, Tree):
+            tree_counts[language] += 1
+            node_counts[language] += _count_tree_nodes(parsed.native_tree)
 
     return ParsedSources(
         parsed_files=tuple(parsed_files),
@@ -163,7 +179,33 @@ def _parse_sources(files: tuple[Path, ...]) -> ParsedSources:
         sloc_lines_by_file=sloc_lines_by_file,
         source_by_file=source_by_file,
         source_lines_by_file=source_lines_by_file,
+        language_by_file=language_by_file,
+        syntax_by_language=_syntax_summaries(tree_counts, node_counts),
     )
+
+
+def _syntax_summaries(
+    tree_counts: Counter[Language],
+    node_counts: Counter[Language],
+) -> tuple[LanguageSyntaxSummary, ...]:
+    return tuple(
+        LanguageSyntaxSummary(
+            language=language,
+            tree_count=tree_counts[language],
+            node_count=node_counts[language],
+        )
+        for language in sorted(tree_counts, key=lambda item: item.value)
+    )
+
+
+def _count_tree_nodes(tree: Tree) -> int:
+    count = 0
+    stack = [tree.root_node]
+    while stack:
+        node = stack.pop()
+        count += 1
+        stack.extend(node.children)
+    return count
 
 
 def _parse_source_file(file_path: Path) -> tuple[str, ParsedFile] | None:
@@ -196,12 +238,13 @@ def _run_and_filter_rules(
         if include_all:
             return ast_hits, structural_findings
 
+        python_source_by_file = _source_by_language(sources, Language.PYTHON)
         ignore_directives = parse_ignore_directives(
-            sources.source_by_file,
+            python_source_by_file,
             valid_rule_ids=_valid_rule_ids(rules_path),
         )
         boundary_ranges = _boundary_function_ranges(
-            parse_boundary_directives(sources.source_by_file),
+            parse_boundary_directives(python_source_by_file),
             functions,
         )
         return (
@@ -229,16 +272,39 @@ def _run_ast_grep(
     *,
     disable_sg: bool,
 ) -> tuple[tuple[AstGrepHit, ...], dict[str, int]]:
-    if disable_sg:
+    python_files = _files_by_language(sources, Language.PYTHON)
+    if disable_sg or not python_files:
         return (), {}
 
     thresholds = load_thresholds(rules_path)
     rule_severities = load_rule_severities(rules_path)
     ast_hits = _with_ast_hit_severities(
-        run_sg(tuple(sources.source_lines_by_file), rules_path),
+        run_sg(python_files, rules_path),
         rule_severities,
     )
     return ast_hits, thresholds
+
+
+def _files_by_language(
+    sources: ParsedSources,
+    language: Language,
+) -> tuple[Path, ...]:
+    return tuple(
+        file_path
+        for file_path in sources.source_lines_by_file
+        if sources.language_by_file.get(file_path) is language
+    )
+
+
+def _source_by_language(
+    sources: ParsedSources,
+    language: Language,
+) -> dict[Path, str]:
+    return {
+        file_path: source
+        for file_path, source in sources.source_by_file.items()
+        if sources.language_by_file.get(file_path) is language
+    }
 
 
 def _filter_ast_hits(
@@ -461,6 +527,7 @@ def _build_flags(findings: Findings) -> Flags:
             high_cog_functions=tuple(high_cog),
             all_functions=tuple(sorted_functions),
         ),
+        syntax_by_language=findings.syntax_by_language,
         lines=LineGroups(
             total_loc_by_file=tuple(
                 sorted(

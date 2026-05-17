@@ -201,7 +201,7 @@ def check(
         raise typer.Exit(code=2) from exc
 
     if not result.flags.lines.total_loc_by_file:
-        typer.echo(f"no Python files could be parsed at {path}", err=True)
+        typer.echo(f"no supported source files could be parsed at {path}", err=True)
         raise typer.Exit(code=2)
 
     if output_format == "json":

@@ -23,8 +23,14 @@ class IRModel(BaseModel):
 class Language(StrEnum):
     """Supported source languages."""
 
+    CPP = "cpp"
+    HASKELL = "haskell"
+    JAVASCRIPT = "javascript"
     PYTHON = "python"
     PYTHON_STUB = "python-stub"
+    RUST = "rust"
+    TYPESCRIPT = "typescript"
+    ZIG = "zig"
 
 
 class Severity(StrEnum):

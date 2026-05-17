@@ -13,7 +13,7 @@ Layers:
 
 - [`cli.py`](cli.py) — top-level Typer app wiring only. Defines the root command group and registers subcommands from [`commands/`](commands/AGENTS.md).
 - [`pipeline.py`](pipeline.py) — public `analyze(path, config) -> AnalysisResult` wires path walking, collection, parsing, semantic indexing, ast-grep, structural rules, clone detection, filtering, and `_build_flags`. Tests may use `analyze_files(files)` for focused analysis coverage.
-- [`config.py`](config.py), [`walker.py`](walker.py) — IO boundaries. `load_config` walks upward to find `scb_check.toml` or `[tool.scb-check]`, stopping at a `.git` dir. `walk_python_files` is a pathlib-based generator that applies `DEFAULT_EXCLUDED_DIRS`, `.gitignore` globs, and user `exclude` globs (supports `**`).
+- [`config.py`](config.py), [`walker.py`](walker.py) — IO boundaries. `load_config` walks upward to find `scb_check.toml` or `[tool.scb-check]`, stopping at a `.git` dir. `walk_source_files` discovers supported source suffixes; `walk_python_files` is retained for Python-only callers. Both apply `DEFAULT_EXCLUDED_DIRS`, `.gitignore` globs, and user `exclude` globs (supports `**`).
 - [`logging.py`](logging.py) — structlog setup. `configure_logging(verbosity)` runs once from the CLI; modules elsewhere just call `get_logger(__name__)`.
 - [`models.py`](models.py) — shared frozen dataclasses for reporting/analysis. Tree-walking IR models live in [`tree_walking/models.py`](tree_walking/models.py).
 

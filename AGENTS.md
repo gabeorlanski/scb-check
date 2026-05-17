@@ -1,6 +1,6 @@
 # AGENTS.md
 
-`scb-check` is a Python CLI that reports **verbosity** (clone + slop-pattern LOC share) and **erosion** (high-complexity function mass share) for a Python codebase. Entrypoint: `scb-check check PATH` → [`src/scb_check/cli.py`](src/scb_check/cli.py).
+`scb-check` is a Python CLI that reports **verbosity** (clone + slop-pattern LOC share) and **erosion** (high-complexity function mass share) for supported source codebases. Entrypoint: `scb-check check PATH` → [`src/scb_check/cli.py`](src/scb_check/cli.py).
 
 See [README.md](README.md) for user-facing usage.
 
@@ -15,8 +15,8 @@ Keep these docs up to date. When behavior, scoring, CLI contracts, source direct
 ## Gotchas (read first)
 
 - **`ty` is the type checker, not mypy.** Run `uv run ty check .`.
-- **ast-grep subprocess**: `run_sg` shells out to the `sg` binary. Tests monkeypatch `scb_check.pipeline.run_sg` (where it's imported) to avoid this — follow that pattern instead of invoking `sg` in tests.
-- **Verbosity is a union**, not a sum. Clone lines ∪ ast-grep lines per file, intersected with SLOC lines. Don't double-count.
+- **ast-grep subprocess**: `run_sg` shells out to the `sg` binary. Tests monkeypatch `scb_check.pipeline.run_sg` (where it's imported) to avoid this — follow that pattern instead of invoking `sg` in tests. Python ast-grep rules run only on Python files.
+- **Verbosity is a union**, not a sum. Clone lines ∪ ast-grep lines per file, intersected with SLOC lines. Don't double-count. Non-Python languages currently contribute clone LOC only.
 - **Dataclasses are `frozen=True, slots=True`** (see [`src/scb_check/models.py`](src/scb_check/models.py)). Pass tuples across module boundaries, not lists.
 
 ## Workflow (every change)

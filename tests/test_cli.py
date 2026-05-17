@@ -38,6 +38,9 @@ _REPORT_KEYS = {
     "high_cc_mass",
     "total_cog_mass",
     "high_cog_mass",
+    "syntax_tree_count",
+    "syntax_node_count",
+    "syntax_by_language",
 }
 
 
@@ -184,6 +187,50 @@ def test_check_disable_sg_shows_non_sg_findings(
     assert "warning[json-loads-read]" not in result.stdout
     assert "erosion:" in result.stdout
     assert "cog_erosion:" in result.stdout
+
+
+def test_check_report_accepts_supported_non_python_file(tmp_path: Path) -> None:
+    """JSON reports include supported non-Python files."""
+    source = tmp_path / "sample.rs"
+    source.write_text(
+        "fn compute(value: i32) -> i32 {\n    value + 1\n}\n",
+        encoding="utf-8",
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["check", "--report", "--disable-sg", str(source)])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["files_scanned"] == 1
+    assert payload["total_functions"] == 1
+
+
+def test_check_report_counts_syntax_by_language(tmp_path: Path) -> None:
+    """JSON reports count syntax trees and nodes by source language."""
+    python_source = tmp_path / "sample.py"
+    python_source.write_text("value = 1\n", encoding="utf-8")
+    rust_source = tmp_path / "sample.rs"
+    rust_source.write_text(
+        "fn compute(value: i32) -> i32 {\n    value + 1\n}\n",
+        encoding="utf-8",
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["check", "--report", "--disable-sg", str(tmp_path)])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    syntax_by_language = payload["syntax_by_language"]
+    assert set(syntax_by_language) == {"python", "rust"}
+    assert syntax_by_language["python"]["tree_count"] == 1
+    assert syntax_by_language["python"]["node_count"] > 0
+    assert syntax_by_language["rust"]["tree_count"] == 1
+    assert syntax_by_language["rust"]["node_count"] > 0
+    assert payload["syntax_tree_count"] == 2
+    assert payload["syntax_node_count"] == sum(
+        summary["node_count"] for summary in syntax_by_language.values()
+    )
 
 
 def test_check_report_allows_disable_sg(
@@ -350,15 +397,15 @@ def test_check_missing_path() -> None:
     assert "path does not exist" in result.output
 
 
-def test_check_non_python_file(tmp_path: Path) -> None:
-    """Non-Python file inputs are rejected."""
+def test_check_unsupported_source_file(tmp_path: Path) -> None:
+    """Unsupported file inputs are rejected."""
     source = tmp_path / "notes.txt"
     source.write_text("hello\n", encoding="utf-8")
     runner = CliRunner()
     result = runner.invoke(main, ["check", str(source)])
 
     assert result.exit_code == 2
-    assert "not a Python file" in result.output
+    assert "not a supported source file" in result.output
 
 
 def test_check_missing_config(tmp_path: Path) -> None:
@@ -407,14 +454,14 @@ def test_check_report_skips_bad_files(
 
 
 def test_check_empty_directory(tmp_path: Path) -> None:
-    """Directories without Python files are rejected."""
+    """Directories without supported source files are rejected."""
     source_dir = tmp_path / "empty"
     source_dir.mkdir()
     runner = CliRunner()
     result = runner.invoke(main, ["check", str(source_dir)])
 
     assert result.exit_code == 2
-    assert "no Python files found" in result.output
+    assert "no supported source files found" in result.output
 
 
 def test_rule_shows_yaml() -> None:

@@ -5,7 +5,9 @@ from math import isclose
 from pathlib import Path
 
 from scb_check.models import Flags
+from scb_check.models import LanguageSyntaxSummary
 from scb_check.reporting.score import compute_report
+from scb_check.tree_walking.models import Language
 from scb_check.tree_walking.models import SignatureIR
 from scb_check.tree_walking.models import SourceSpan
 from scb_check.tree_walking.models import SymbolIR
@@ -40,6 +42,13 @@ def test_report_unions_verbosity_lines(
         high_cog_functions=[low],
         total_loc_by_file=[(path, 10)],
         all_functions=[high, low],
+        syntax_by_language=[
+            LanguageSyntaxSummary(
+                language=Language.PYTHON,
+                tree_count=1,
+                node_count=42,
+            ),
+        ],
         clone_sloc_lines_by_file=[(path, {2, 3})],
         ast_sloc_lines_by_file=[(path, {3, 4})],
         structural_sloc_lines_by_file=[(path, {4, 5})],
@@ -62,6 +71,11 @@ def test_report_unions_verbosity_lines(
     assert isclose(report.function_summary.total_cog_mass, 36.0)
     assert isclose(report.function_summary.high_cog_mass, 24.0)
     assert isclose(report.scores.cog_erosion, 24.0 / 36.0)
+    assert report.syntax_tree_count == 1
+    assert report.syntax_node_count == 42
+    assert report.to_dict()["syntax_by_language"] == {
+        "python": {"tree_count": 1, "node_count": 42},
+    }
 
 
 def _function_symbol(  # noqa: PLR0913

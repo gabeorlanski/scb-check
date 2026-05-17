@@ -1,12 +1,12 @@
 # scb-check
 
-Python CLI that reports SCBench verbosity and erosion composites for a Python codebase.
+Python CLI that reports SCBench verbosity and erosion composites for supported source codebases.
 
 - [Paper](https://arxiv.org/abs/2603.24755)
 - [Source](https://github.com/gabeorlanski/scb-check)
 - [SlopCodeBench (main repo)](https://github.com/SprocketLab/slop-code-bench)
 
-- **Verbosity**: fraction of SLOC flagged by clone detection, ast-grep slop rules, or structural rules.
+- **Verbosity**: fraction of SLOC flagged by clone detection, ast-grep slop rules, or structural rules. Non-Python languages currently contribute clone lines only.
 - **Erosion**: share of function "mass" (`complexity * sqrt(sloc)`) concentrated in high-complexity functions (cyclomatic complexity > 10).
 - **Cognitive erosion**: same mass-share calculation using cognitive complexity > 10.
 
@@ -57,11 +57,13 @@ scb-check check PATH --min-duplicate-lines N  # show duplicate groups with at le
 scb-check rule RULE_ID                  # print YAML or metadata for a specific rule
 ```
 
-`PATH` may be a file or directory. Directories are walked for `*.py` files. Directory discovery respects `.gitignore` globs by default; use `--include-all` to scan gitignored Python files too.
+`PATH` may be a file or directory. Directories are walked for supported source files: Python (`.py`, `.pyw`), Rust (`.rs`), JavaScript (`.js`, `.mjs`, `.cjs`), TypeScript (`.ts`), Zig (`.zig`), Haskell (`.hs`), and C++ (`.cpp`, `.cc`, `.cxx`, `.c++`, `.hpp`, `.hh`, `.hxx`). Directory discovery respects `.gitignore` globs by default; use `--include-all` to scan gitignored supported files too.
 
 ### JSON report fields
 
-`verbosity`, `erosion`, `cog_erosion`, `files_scanned`, `total_loc`, `verbosity_flagged_loc`, `clone_loc`, `ast_grep_flagged_loc`, `structural_rule_loc`, `structural_rule_findings`, `total_functions`, `high_cc_functions`, `high_cog_functions`, `total_mass`, `high_cc_mass`, `total_cog_mass`, `high_cog_mass`.
+`verbosity`, `erosion`, `cog_erosion`, `files_scanned`, `total_loc`, `verbosity_flagged_loc`, `clone_loc`, `ast_grep_flagged_loc`, `structural_rule_loc`, `structural_rule_findings`, `total_functions`, `high_cc_functions`, `high_cog_functions`, `total_mass`, `high_cc_mass`, `total_cog_mass`, `high_cog_mass`, `syntax_tree_count`, `syntax_node_count`, and `syntax_by_language`.
+
+`syntax_by_language` is keyed by language value and reports `tree_count` plus total Tree-sitter `node_count` for parsed files in that language.
 
 ## Configuration
 
@@ -80,10 +82,12 @@ exclude = ["tests/fixtures/*"]
 context = 2
 ```
 
-- `exclude`: list of glob patterns to skip while discovering Python files.
+- `exclude`: list of glob patterns to skip while discovering supported source files.
 - `context`: number of surrounding source lines to show around human-readable ast-grep, structural rule, and erosion findings.
 
 Configured `exclude` patterns still apply when `--include-all` is used; only `.gitignore` file discovery is extended.
+
+Ast-grep slop rules, structural rules, and source directives are currently Python-only. Rust, JavaScript, TypeScript, Zig, Haskell, and C++ still participate in SLOC totals, clone detection, cyclomatic erosion, and cognitive erosion.
 
 When using `pyproject.toml`, scb-check also includes excludes from:
 
@@ -93,7 +97,7 @@ When using `pyproject.toml`, scb-check also includes excludes from:
 
 ## Source directives
 
-You can suppress specific ast-grep or structural rule findings at the source line level with:
+In Python files, you can suppress specific ast-grep or structural rule findings at the source line level with:
 
 ```python
 # scbc ignore[rule-id]
@@ -144,9 +148,9 @@ Rules:
 
 ## How it works
 
-- **Tree walking**: language dispatch backed by tree-sitter-python emits language-agnostic `ModuleIR` and semantic project context.
+- **Tree walking**: language dispatch backed by tree-sitter grammars emits language-agnostic `ModuleIR` and semantic project context.
 - **Clone detection**: hashed AST blocks across the scanned set; two or more matching instances become a `CloneBlock`.
-- **Slop patterns**: ast-grep rules in `src/scb_check/resources/slop_rules/` split by category (e.g. `range(len(x))`, `dict.get(k, None)`, `isinstance` ladders, manual min/max, defensive guards).
+- **Slop patterns**: Python ast-grep rules in `src/scb_check/resources/slop_rules/` split by category (e.g. `range(len(x))`, `dict.get(k, None)`, `isinstance` ladders, manual min/max, defensive guards).
 - **Structural rules**: typed Python classes in `src/scb_check/rules/` run over tree-walking IR. `trivial-wrapper` flags removable single-return pass-through functions (identity returns and calls that only forward parameters to another scanned function), while semantic keep reasons skip constant returns, external calls, decorated functions, dunder methods, and inherited API implementations.
 - **Extra local slop patterns**: set `SCB_CHECK_EXTRA_SLOP_RULES` to a `:`-separated list of YAML paths to layer additional rules on top of the bundled set.
 - **Complexity**: per-function cyclomatic and cognitive complexity plus SLOC, combined into mass scores for erosion metrics.

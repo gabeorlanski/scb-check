@@ -11,6 +11,7 @@ from scb_check.models import CloneBlock
 from scb_check.models import FileLineSet
 from scb_check.models import FindingGroups
 from scb_check.models import Flags
+from scb_check.models import LanguageSyntaxSummary
 from scb_check.models import LineGroups
 from scb_check.tree_walking.models import RuleFinding
 from scb_check.tree_walking.models import SymbolIR
@@ -24,6 +25,7 @@ def _make_flags(  # noqa: PLR0913
     high_cc_functions: Iterable[SymbolIR] = (),
     high_cog_functions: Iterable[SymbolIR] = (),
     all_functions: Iterable[SymbolIR] = (),
+    syntax_by_language: Iterable[LanguageSyntaxSummary] = (),
     total_loc_by_file: Iterable[tuple[Path, int]] = (),
     clone_sloc_lines_by_file: Iterable[FileLineSet | tuple[Path, Iterable[int]]] = (),
     ast_sloc_lines_by_file: Iterable[FileLineSet | tuple[Path, Iterable[int]]] = (),
@@ -40,6 +42,7 @@ def _make_flags(  # noqa: PLR0913
             high_cog_functions=tuple(high_cog_functions),
             all_functions=tuple(all_functions),
         ),
+        syntax_by_language=tuple(syntax_by_language),
         lines=LineGroups(
             total_loc_by_file=tuple(total_loc_by_file),
             clone_sloc_lines_by_file=_line_sets(clone_sloc_lines_by_file),

@@ -1,4 +1,4 @@
-"""Discover Python files while applying configured excludes."""
+"""Discover supported source files while applying configured excludes."""
 
 from __future__ import annotations
 
@@ -8,6 +8,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from scb_check.config import Config
+from scb_check.tree_walking.dispatch import SUPPORTED_SOURCE_SUFFIXES
+
+_PYTHON_SUFFIXES = frozenset({".py"})
 
 DEFAULT_EXCLUDED_DIRS = frozenset(
     {
@@ -45,12 +48,45 @@ def walk_python_files(
     include_ignored: bool = False,
 ) -> Iterator[Path]:
     """Yield Python files under `path` after applying discovery excludes."""
+    yield from _walk_supported_files(
+        path,
+        config,
+        include_ignored=include_ignored,
+        suffixes=_PYTHON_SUFFIXES,
+        file_kind="Python",
+    )
+
+
+def walk_source_files(
+    path: Path,
+    config: Config,
+    *,
+    include_ignored: bool = False,
+) -> Iterator[Path]:
+    """Yield supported source files after applying discovery excludes."""
+    yield from _walk_supported_files(
+        path,
+        config,
+        include_ignored=include_ignored,
+        suffixes=SUPPORTED_SOURCE_SUFFIXES,
+        file_kind="supported source",
+    )
+
+
+def _walk_supported_files(
+    path: Path,
+    config: Config,
+    *,
+    include_ignored: bool,
+    suffixes: frozenset[str],
+    file_kind: str,
+) -> Iterator[Path]:
     if not path.exists():
         raise FileNotFoundError(f"path does not exist: {path}")
 
     if path.is_file():
-        if path.suffix != ".py":
-            raise ValueError(f"not a Python file: {path}")
+        if path.suffix.lower() not in suffixes:
+            raise ValueError(f"not a {file_kind} file: {path}")
         yield path.resolve()
         return
 
@@ -61,6 +97,7 @@ def walk_python_files(
         config,
         include_ignored=include_ignored,
         gitignore_rules=gitignore_rules,
+        suffixes=suffixes,
     )
 
 
@@ -70,6 +107,7 @@ def _walk_directory(
     *,
     include_ignored: bool,
     gitignore_rules: tuple[_GitIgnoreRule, ...],
+    suffixes: frozenset[str],
 ) -> Iterator[Path]:
     active_gitignore_rules = gitignore_rules
     if not include_ignored:
@@ -81,6 +119,7 @@ def _walk_directory(
             config,
             include_ignored=include_ignored,
             gitignore_rules=active_gitignore_rules,
+            suffixes=suffixes,
         )
 
 
@@ -90,6 +129,7 @@ def _walk_child(
     *,
     include_ignored: bool,
     gitignore_rules: tuple[_GitIgnoreRule, ...],
+    suffixes: frozenset[str],
 ) -> Iterator[Path]:
     if child.is_symlink():
         return
@@ -101,14 +141,16 @@ def _walk_child(
                 config,
                 include_ignored=include_ignored,
                 gitignore_rules=gitignore_rules,
+                suffixes=suffixes,
             )
         return
 
-    if _is_discoverable_python_file(
+    if _is_discoverable_source_file(
         child,
         config,
         include_ignored=include_ignored,
         gitignore_rules=gitignore_rules,
+        suffixes=suffixes,
     ):
         yield child.resolve()
 
@@ -124,15 +166,16 @@ def _is_discoverable_directory(
     )
 
 
-def _is_discoverable_python_file(
+def _is_discoverable_source_file(
     path: Path,
     config: Config,
     *,
     include_ignored: bool,
     gitignore_rules: tuple[_GitIgnoreRule, ...],
+    suffixes: frozenset[str],
 ) -> bool:
     return (
-        path.suffix == ".py"
+        path.suffix.lower() in suffixes
         and not _is_user_excluded(path, config)
         and (
             include_ignored

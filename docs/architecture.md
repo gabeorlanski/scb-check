@@ -1,6 +1,6 @@
 # Architecture
 
-`scb-check` answers one question: **how sloppy is this Python codebase?** It reports composite scores plus location-level flags that explain those scores.
+`scb-check` answers one question: **how sloppy is this source codebase?** It reports composite scores plus location-level flags that explain those scores.
 
 ## Metrics
 
@@ -10,9 +10,11 @@
 
 Per file, flagged lines are the union of:
 
-- clone lines from duplicated syntax blocks,
-- `ast-grep` lines from bundled or extra YAML rules,
+- clone lines from duplicated syntax blocks in any supported language,
+- Python `ast-grep` lines from bundled or extra YAML rules,
 - structural rule lines from Python rule classes.
+
+Rust, JavaScript, TypeScript, Zig, Haskell, and C++ currently have no bundled slop-pattern rules, so their verbosity contribution is clone LOC only.
 
 That union is intersected with `SLOC`, then divided by total `SLOC`. A line flagged by more than one source counts once.
 
@@ -31,16 +33,16 @@ That union is intersected with `SLOC`, then divided by total `SLOC`. A line flag
 ```text
 CLI (`cli.py` / `commands/`)
     │
-    ├─ load config and discover Python files
+    ├─ load config and discover supported source files
     │
     ▼
 `analyze()` in `pipeline.py`
     │
-    ├─ parse source with tree-sitter-python
-    │      └─ emit `ModuleIR`, `SLOC`, symbols, and operations
+    ├─ parse source with language-specific tree-sitter grammars
+    │      └─ emit `ModuleIR`, `SLOC`, symbols, and complexity facts
     ├─ build `ProjectIR` semantic indexes
     ├─ detect clone blocks from parser-native trees
-    ├─ run bundled and extra `ast-grep` rules through `sg`
+    ├─ run bundled and extra Python `ast-grep` rules through `sg`
     ├─ run structural rules over `ProjectIR`
     ├─ apply source ignores, boundary suppression, severity, and thresholds
     └─ build sorted `Flags`
@@ -52,25 +54,25 @@ CLI (`cli.py` / `commands/`)
 ## Layers
 
 - Boundary: `cli.py`, `commands/`, `config.py`, `walker.py`, and `logging.py` parse arguments, load configuration, walk paths, and wire logging. They do not score code.
-- Tree walking: `tree_walking/` parses already-read Python source, computes `SLOC`, parses source directives, emits language-agnostic IR, and builds semantic project context. See [Tree walking](tree-walking.md).
+- Tree walking: `tree_walking/` parses already-read supported source, computes `SLOC`, parses Python source directives, emits language-agnostic IR, and builds semantic project context. See [Tree walking](tree-walking.md).
 - Analysis: `analysis/` owns integrations that intentionally use external or parser-native details: `ast-grep` subprocess execution and clone hashing.
 - Rules: `rules/` owns structural rule classes, their registry, metadata, and the runner.
-- Reporting: `reporting/` turns `Flags` into JSON reports or human-readable flag text.
+- Reporting: `reporting/` turns `Flags` into JSON reports or human-readable flag text. JSON reports include score summaries plus syntax tree and node counts by parsed language.
 - Shared models: `models.py` contains frozen dataclasses shared by analysis, pipeline, and reporting. Tree-walking IR models live in `tree_walking/models.py`.
 
 ## Vocabulary
 
 `SLOC`
-: Real source lines of code. Comments, blank lines, and standalone non-byte, non-f-string string statements do not count.
+: Real source lines of code. Comments, blank lines, punctuation-only delimiter lines in generic parsers, and standalone non-byte, non-f-string Python string statements do not count.
 
 `source directive`
-: Comment directive parsed with `tokenize`, such as `# scbc ignore[...]` or `# scbc boundary`.
+: Python comment directive parsed with `tokenize`, such as `# scbc ignore[...]` or `# scbc boundary`.
 
 `boundary suppression`
 : `# scbc boundary` inside a function body hides default `ast-grep` findings in that function. Use `--include-all` to show boundary-suppressed findings.
 
 `ast-grep rule`
-: YAML-backed rule run by the `sg` subprocess. Extra local rules come from `SCB_CHECK_EXTRA_SLOP_RULES`.
+: Python YAML-backed rule run by the `sg` subprocess. Extra local rules come from `SCB_CHECK_EXTRA_SLOP_RULES`.
 
 `clone finding`
 : Duplicate syntax block found by hashing normalized tree-sitter subtrees.
@@ -96,7 +98,8 @@ CLI (`cli.py` / `commands/`)
 ## Design constraints
 
 - Line numbers are 1-indexed after tree-sitter data leaves the parser layer.
-- Python `*.py` files are the current user-facing scan target.
+- Supported scan targets are Python (`.py`, `.pyw`), Rust (`.rs`), JavaScript (`.js`, `.mjs`, `.cjs`), TypeScript (`.ts`), Zig (`.zig`), Haskell (`.hs`), and C++ (`.cpp`, `.cc`, `.cxx`, `.c++`, `.hpp`, `.hh`, `.hxx`).
+- `ast-grep`, structural rules, and source directives are Python-only until language-specific rule sets exist.
 - Parser-native data may live on parsed file artifacts for clone detection, but not in `ModuleIR`, `ProjectIR`, or structural rules.
 - `ast-grep` failure is non-fatal. A missing `sg` binary, `OSError`, non-zero exit, or invalid JSON returns no hits.
 - Source ignores and structural rules share one rule ID namespace, so `scbc ignore[...]` is never ambiguous.
@@ -107,9 +110,9 @@ CLI (`cli.py` / `commands/`)
 
 Change these only with tests and documentation updates because they move user-visible scores:
 
-- `SLOC` exclusions in `tree_walking/languages/python.py`,
-- `CLONE_NODE_TYPES` and clone normalization in `analysis/clones.py`,
-- cyclomatic and cognitive complexity node sets in `tree_walking/languages/python.py`,
+- `SLOC` exclusions in `tree_walking/languages/python.py` and `tree_walking/languages/generic.py`,
+- `CLONE_NODE_TYPES`, language clone configs, and clone normalization in `analysis/clones.py` plus `tree_walking/languages/*`,
+- cyclomatic and cognitive complexity node sets in `tree_walking/languages/python.py` and `tree_walking/languages/*`,
 - structural rule span selection and filtering in `rules/` and `pipeline.py`,
 - verbosity union logic in `reporting/score.py`.
 

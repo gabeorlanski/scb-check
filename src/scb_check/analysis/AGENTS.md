@@ -3,7 +3,7 @@
 This layer keeps analysis that is intentionally separate from generic tree walking:
 
 - [`astgrep.py`](astgrep.py) shells out to the `sg` binary and returns ast-grep hits.
-- [`clones.py`](clones.py) uses parser-native tree-sitter data preserved on parsed file artifacts to hash duplicate syntax blocks.
+- [`clones.py`](clones.py) uses parser-native tree-sitter data preserved on parsed file artifacts to hash duplicate syntax blocks across supported languages.
 
 Source directives, SLOC accounting, parser dispatch, symbol extraction, string-literal helpers, semantic context, and structural rules live under [`../tree_walking/`](../tree_walking/) and [`../rules/`](../rules/), not here.
 
@@ -17,7 +17,7 @@ Source directives, SLOC accounting, parser dispatch, symbol extraction, string-l
 
 These drive the verbosity/erosion numbers — change with care:
 
-- `CLONE_NODE_TYPES` in [`clones.py`](clones.py) — which block types get hashed.
+- `CLONE_NODE_TYPES` in [`clones.py`](clones.py) and language clone configs under [`../tree_walking/languages/`](../tree_walking/languages/) — which block types get hashed.
 - `_hash_ast_subtree` / `_normalize_ast` — identifier and literal normalization.
 
 ## ast-grep boundary

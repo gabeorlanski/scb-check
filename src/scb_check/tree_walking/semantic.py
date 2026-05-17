@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from itertools import groupby
+from os.path import commonpath
 from pathlib import Path
 
 from scb_check.tree_walking.models import EffectIR
 from scb_check.tree_walking.models import EffectKind
+from scb_check.tree_walking.models import Language
 from scb_check.tree_walking.models import ModuleIR
 from scb_check.tree_walking.models import OperationIR
 from scb_check.tree_walking.models import OperationKind
@@ -37,10 +40,22 @@ _MEANINGFUL_RETURN_EFFECTS = frozenset(
         EffectKind.WRITE,
     },
 )
+_GENERIC_LANGUAGES = frozenset(
+    {
+        Language.CPP,
+        Language.HASKELL,
+        Language.JAVASCRIPT,
+        Language.RUST,
+        Language.TYPESCRIPT,
+        Language.ZIG,
+    },
+)
+_FUNCTION_SYMBOL_KINDS = frozenset({SymbolKind.FUNCTION, SymbolKind.METHOD})
 
 
 def build_project(modules: tuple[ModuleIR, ...]) -> ProjectIR:
     """Build project semantic indexes and derived effects from modules."""
+    modules = _with_unique_generic_function_names(modules)
     symbols = tuple(symbol for module in modules for symbol in module.symbols)
     symbols_by_qualified_name = {
         symbol.qualified_name: symbol for symbol in symbols
@@ -62,6 +77,81 @@ def build_project(modules: tuple[ModuleIR, ...]) -> ProjectIR:
         symbols_by_file=symbols_by_file,
         effects_by_symbol=effects_by_symbol,
     )
+
+
+def _with_unique_generic_function_names(
+    modules: tuple[ModuleIR, ...],
+) -> tuple[ModuleIR, ...]:
+    duplicate_names = _duplicate_qualified_names(modules)
+    if not duplicate_names:
+        return modules
+
+    source_root = _common_source_root(modules)
+    return tuple(
+        module.model_copy(
+            update={
+                "symbols": tuple(
+                    _with_disambiguated_qualified_name(symbol, source_root)
+                    if _needs_generic_disambiguation(symbol, duplicate_names)
+                    else symbol
+                    for symbol in module.symbols
+                ),
+            },
+        )
+        for module in modules
+    )
+
+
+def _duplicate_qualified_names(modules: tuple[ModuleIR, ...]) -> frozenset[str]:
+    counts = Counter(
+        symbol.qualified_name
+        for module in modules
+        for symbol in module.symbols
+    )
+    return frozenset(
+        qualified_name
+        for qualified_name, count in counts.items()
+        if count > 1
+    )
+
+
+def _needs_generic_disambiguation(
+    symbol: SymbolIR,
+    duplicate_names: frozenset[str],
+) -> bool:
+    return (
+        symbol.language in _GENERIC_LANGUAGES
+        and symbol.kind in _FUNCTION_SYMBOL_KINDS
+        and symbol.qualified_name in duplicate_names
+    )
+
+
+def _with_disambiguated_qualified_name(
+    symbol: SymbolIR,
+    source_root: Path,
+) -> SymbolIR:
+    signature = ",".join(symbol.signature.parameters)
+    location = _symbol_location_key(symbol, source_root)
+    qualified_name = (
+        f"{symbol.qualified_name}@{location}:"
+        f"{symbol.start_line}-{symbol.end_line}({signature})"
+    )
+    return symbol.model_copy(update={"qualified_name": qualified_name})
+
+
+def _symbol_location_key(symbol: SymbolIR, source_root: Path) -> str:
+    try:
+        relative_path = symbol.file.relative_to(source_root)
+    except ValueError:
+        relative_path = symbol.file
+    return relative_path.with_suffix("").as_posix().replace("/", ".")
+
+
+def _common_source_root(modules: tuple[ModuleIR, ...]) -> Path:
+    directories = tuple(module.file.parent for module in modules)
+    if not directories:
+        return Path()
+    return Path(commonpath(tuple(directory.as_posix() for directory in directories)))
 
 
 class RuleContext:

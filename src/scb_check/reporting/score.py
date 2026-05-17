@@ -64,6 +64,7 @@ def compute_report(flags: Flags) -> Report:
             total_cog_mass=cognitive.total,
             high_cog_mass=cognitive.flagged,
         ),
+        syntax_by_language=flags.syntax_by_language,
     )
 
 

@@ -6,6 +6,30 @@ import pytest
 
 from scb_check.config import Config
 from scb_check.walker import walk_python_files
+from scb_check.walker import walk_source_files
+
+
+def test_walk_source_files_discovers_supported_languages(tmp_path: Path) -> None:
+    """Source discovery includes every supported language extension."""
+    root = tmp_path / "repo"
+    root.mkdir()
+    supported_names = (
+        "python.py",
+        "rust.rs",
+        "javascript.js",
+        "typescript.ts",
+        "zig.zig",
+        "haskell.hs",
+        "cpp.cpp",
+    )
+    for name in supported_names:
+        (root / name).write_text("value = 1\n", encoding="utf-8")
+    (root / "notes.txt").write_text("hello\n", encoding="utf-8")
+
+    config = Config(exclude=(), base_dir=root)
+    files = tuple(sorted(walk_source_files(root, config)))
+
+    assert files == tuple(sorted((root / name).resolve() for name in supported_names))
 
 
 def test_walk_skips_default_dirs(

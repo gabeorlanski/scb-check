@@ -9,7 +9,13 @@ from typing import Protocol
 from scb_check.tree_walking.artifacts import LanguageParseError
 from scb_check.tree_walking.artifacts import ParsedFile
 from scb_check.tree_walking.artifacts import ProjectParseError
+from scb_check.tree_walking.languages.cpp import CPPParser
+from scb_check.tree_walking.languages.haskell import HaskellParser
+from scb_check.tree_walking.languages.javascript import JavaScriptParser
 from scb_check.tree_walking.languages.python import PythonParser
+from scb_check.tree_walking.languages.rust import RustParser
+from scb_check.tree_walking.languages.typescript import TypeScriptParser
+from scb_check.tree_walking.languages.zig import ZigParser
 from scb_check.tree_walking.models import Language
 
 
@@ -26,11 +32,36 @@ ExtensionLanguages = Mapping[str, tuple[Language, ...]]
 ParserRegistry = Mapping[Language, LanguageParser]
 
 DEFAULT_EXTENSION_LANGUAGES: ExtensionLanguages = {
+    ".c++": (Language.CPP,),
+    ".cc": (Language.CPP,),
+    ".cpp": (Language.CPP,),
+    ".cxx": (Language.CPP,),
+    ".hh": (Language.CPP,),
+    ".hpp": (Language.CPP,),
+    ".hs": (Language.HASKELL,),
+    ".hxx": (Language.CPP,),
+    ".js": (Language.JAVASCRIPT,),
+    ".mjs": (Language.JAVASCRIPT,),
+    ".cjs": (Language.JAVASCRIPT,),
     ".py": (Language.PYTHON,),
     ".pyw": (Language.PYTHON,),
+    ".rs": (Language.RUST,),
+    ".ts": (Language.TYPESCRIPT,),
+    ".zig": (Language.ZIG,),
 }
-_DEFAULT_PYTHON_PARSER = PythonParser()
-_DEFAULT_PARSERS: ParserRegistry = {_DEFAULT_PYTHON_PARSER.language: _DEFAULT_PYTHON_PARSER}
+SUPPORTED_SOURCE_SUFFIXES = frozenset(DEFAULT_EXTENSION_LANGUAGES)
+_DEFAULT_PARSERS: ParserRegistry = {
+    parser.language: parser
+    for parser in (
+        CPPParser(),
+        HaskellParser(),
+        JavaScriptParser(),
+        PythonParser(),
+        RustParser(),
+        TypeScriptParser(),
+        ZigParser(),
+    )
+}
 
 
 def parse_source_file(

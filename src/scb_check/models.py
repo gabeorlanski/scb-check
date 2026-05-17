@@ -8,10 +8,12 @@ from dataclasses import field
 from pathlib import Path
 from typing import Literal
 
+from scb_check.tree_walking.models import Language
 from scb_check.tree_walking.models import RuleFinding
 from scb_check.tree_walking.models import SymbolIR
 
 type AstGrepSeverity = Literal["info", "warning", "critical"]
+type ReportValue = int | float | dict[str, dict[str, int]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,11 +80,21 @@ class LineGroups:
 
 
 @dataclass(frozen=True, slots=True)
+class LanguageSyntaxSummary:
+    """Syntax tree and node counts for one source language."""
+
+    language: Language
+    tree_count: int
+    node_count: int
+
+
+@dataclass(frozen=True, slots=True)
 class Flags:
     """Sorted analysis findings and line sets used for reporting."""
 
     findings: FindingGroups = field(default_factory=FindingGroups)
     lines: LineGroups = field(default_factory=LineGroups)
+    syntax_by_language: tuple[LanguageSyntaxSummary, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,9 +139,20 @@ class Report:
     scores: ReportScores
     verbosity_summary: VerbositySummary
     function_summary: FunctionMassSummary
+    syntax_by_language: tuple[LanguageSyntaxSummary, ...] = ()
 
-    def to_dict(self) -> dict[str, int | float]:
-        """Return the flat JSON-compatible report payload."""
+    @property
+    def syntax_tree_count(self) -> int:
+        """Return the total parsed syntax tree count."""
+        return sum(summary.tree_count for summary in self.syntax_by_language)
+
+    @property
+    def syntax_node_count(self) -> int:
+        """Return the total syntax node count."""
+        return sum(summary.node_count for summary in self.syntax_by_language)
+
+    def to_dict(self) -> dict[str, ReportValue]:
+        """Return the JSON-compatible report payload."""
         return {
             "verbosity": self.scores.verbosity,
             "erosion": self.scores.erosion,
@@ -148,4 +171,13 @@ class Report:
             "high_cc_mass": self.function_summary.high_cc_mass,
             "total_cog_mass": self.function_summary.total_cog_mass,
             "high_cog_mass": self.function_summary.high_cog_mass,
+            "syntax_tree_count": self.syntax_tree_count,
+            "syntax_node_count": self.syntax_node_count,
+            "syntax_by_language": {
+                summary.language.value: {
+                    "tree_count": summary.tree_count,
+                    "node_count": summary.node_count,
+                }
+                for summary in self.syntax_by_language
+            },
         }

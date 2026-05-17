@@ -12,6 +12,56 @@ from scb_check.pipeline import analyze
 from scb_check.pipeline import analyze_files
 
 
+def test_analysis_scans_non_python_but_runs_python_sg_only(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Non-Python files get IR analysis without Python ast-grep rules."""
+    python_file = _write_source(
+        tmp_path,
+        "sample.py",
+        """
+        def helper(value):
+            return value
+        """,
+    )
+    rust_file = _write_source(
+        tmp_path,
+        "sample.rs",
+        """
+        fn compute(value: i32) -> i32 {
+            if value > 0 {
+                return value;
+            }
+            0
+        }
+        """,
+    )
+    captured: dict[str, tuple[Path, ...]] = {}
+
+    def fake_run_sg(files: tuple[Path, ...], rules_path: Path) -> tuple[AstGrepHit, ...]:
+        del rules_path
+        captured["files"] = files
+        return (_ast_hit(python_file, 2, "json-loads-read"),)
+
+    monkeypatch.setattr("scb_check.pipeline.run_sg", fake_run_sg)
+
+    result = analyze_files((python_file, rust_file))
+
+    assert captured["files"] == (python_file,)
+    assert {path for path, _loc in result.flags.lines.total_loc_by_file} == {
+        python_file,
+        rust_file,
+    }
+    assert {symbol.name for symbol in result.flags.findings.all_functions} == {
+        "helper",
+        "compute",
+    }
+    assert tuple(hit.file for hit in result.flags.findings.ast_grep_hits) == (
+        python_file,
+    )
+
+
 def test_include_all_extends_discovery_to_gitignored_files(tmp_path: Path) -> None:
     """Default discovery respects `.gitignore`; `include_all` scans those files."""
     root = tmp_path / "repo"
