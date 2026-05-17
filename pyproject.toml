@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "scb-check"
-version = "0.1.3"
+version = "0.2.0"
 description = "CLI for measuring verbosity and erosion metrics in supported source codebases"
 readme = "README.md"
 license = "MIT"

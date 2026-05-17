@@ -1,7 +1,7 @@
-"""Analyze Python codebases for verbosity and erosion."""
+"""Analyze supported source codebases for verbosity and erosion."""
 
 from __future__ import annotations
 
 __all__ = ["__version__"]
 
-__version__ = "0.1.3"
+__version__ = "0.2.0"
