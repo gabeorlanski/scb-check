@@ -68,9 +68,9 @@ Function-like symbols carry:
 
 - `SignatureIR` with parameter names, annotations, and return annotation text,
 - body `OperationIR` records for top-level executable body statements,
-- call `ReferenceIR` records resolved through imports when possible,
+- call `ReferenceIR` records resolved through imports when possible, including the control-flow nesting depth of each call,
 - `SymbolRole` facts for keep reasons,
-- `SLOC`, cyclomatic complexity, and cognitive complexity.
+- `SLOC`, cyclomatic complexity, cognitive complexity, and maximum control-flow nesting depth.
 
 The walker only normalizes the facts current rules need. Unknown or unsupported syntax should become `OperationKind.UNKNOWN` or `ValueKind.UNKNOWN`, not parser-native leakage.
 
@@ -101,7 +101,8 @@ The parser assigns conservative `SymbolRole` facts:
 
 - dunder methods are `CONTRACT_MEMBER`,
 - decorated functions are `CONTRACT_MEMBER`, except `@property`-style decorators become `COMPUTED_ATTRIBUTE`,
-- methods on classes with base names are `INHERITED_OVERRIDE`.
+- methods on classes with base names are `INHERITED_OVERRIDE`,
+- single-return functions that return a parameter with a literal, collection, or uppercase constant default are `FACTORY` value providers.
 
 Structural rules do not inspect decorators, base-class syntax, or Python nodes directly. They ask `RuleContext` questions such as `is_required_api_surface()`.
 
@@ -128,7 +129,7 @@ When generic-language function names collide across duplicate basenames or overl
 
 Effects are derived from normalized operations and values. Invocation values become `PROJECT_CALL`, `EXTERNAL_CALL`, or `UNRESOLVED_CALL`; symbol and member values become `READ`; raise operations become `RAISE`.
 
-`RuleContext` is the structural-rule API over `ProjectIR`. Add a query there when a rule needs a new semantic question, rather than teaching the rule Python syntax.
+`RuleContext` is the structural-rule API over `ProjectIR`. It exposes derived effects and resolved project call sites for rules such as `low-use-short-function`, which estimates whether inlining a short helper would stay within caller SLOC, complexity, cognitive complexity, and nesting budgets. Add a query there when a rule needs a new semantic question, rather than teaching the rule Python syntax.
 
 ## Extension rules
 

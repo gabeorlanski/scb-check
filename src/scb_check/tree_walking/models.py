@@ -146,6 +146,7 @@ class ReferenceIR(IRModel):
     resolved_name: str | None
     kind: Literal["call", "reference"]
     span: SourceSpan
+    nesting: int = 0
 
 
 class ValueIR(IRModel):
@@ -195,6 +196,7 @@ class SymbolIR(IRModel):
     sloc: int = 0
     cyc_complexity: int = 1
     cog_complexity: int = 0
+    max_nesting: int = 0
 
     @property
     def file(self) -> Path:

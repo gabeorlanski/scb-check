@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from dataclasses import field
 from typing import ClassVar, Protocol
 
+from scb_check.rules.low_use_short_function import LowUseShortFunctionRule
+from scb_check.rules.settings import LowUseShortFunctionSettings
 from scb_check.rules.trivial_wrapper import TrivialWrapperRule
 from scb_check.tree_walking.models import Language
 from scb_check.tree_walking.models import RuleFinding
@@ -55,6 +57,7 @@ class RuleRegistry:
 
 RULE_REGISTRY = RuleRegistry()
 RULE_REGISTRY.register(TrivialWrapperRule())
+RULE_REGISTRY.register(LowUseShortFunctionRule())
 
 
 type RuleMetadataValue = str | list[str]
@@ -63,6 +66,13 @@ type RuleMetadataValue = str | list[str]
 def structural_rules() -> tuple[Rule, ...]:
     """Return all registered structural rules."""
     return RULE_REGISTRY.all()
+
+
+def configured_structural_rules(
+    low_use_short_function: LowUseShortFunctionSettings,
+) -> tuple[Rule, ...]:
+    """Return structural rules using runtime configuration."""
+    return (TrivialWrapperRule(), LowUseShortFunctionRule(low_use_short_function))
 
 
 def structural_rule_ids() -> frozenset[str]:

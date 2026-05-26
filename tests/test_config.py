@@ -171,6 +171,49 @@ def test_ignores_bad_tool_excludes_explicit(
     assert config.base_dir == tmp_path
 
 
+def test_reads_low_use_short_function_settings(tmp_path: Path) -> None:
+    """Inline-safety budgets for low-use helpers are read from config."""
+    config_file = tmp_path / "scb-check.toml"
+    config_file.write_text(
+        "\n".join(
+            [
+                "[low-use-short-function]",
+                "enabled = false",
+                "max-call-sites = 1",
+                "max-function-sloc = 4",
+                "max-inline-caller-sloc = 20",
+                "max-inline-caller-complexity = 8",
+                "max-inline-caller-cognitive-complexity = 7",
+                "max-inline-call-nesting = 2",
+            ],
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    config = load_config(config_file, tmp_path)
+
+    assert not config.low_use_short_function.enabled
+    assert config.low_use_short_function.max_call_sites == 1
+    assert config.low_use_short_function.max_function_sloc == 4
+    assert config.low_use_short_function.max_inline_caller_sloc == 20
+    assert config.low_use_short_function.max_inline_caller_complexity == 8
+    assert config.low_use_short_function.max_inline_caller_cognitive_complexity == 7
+    assert config.low_use_short_function.max_inline_call_nesting == 2
+
+
+def test_rejects_invalid_low_use_short_function_settings(tmp_path: Path) -> None:
+    """Invalid low-use helper budgets raise ConfigError."""
+    config_file = tmp_path / "scb-check.toml"
+    config_file.write_text(
+        "[low-use-short-function]\nmax-call-sites = 0\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="max-call-sites must be >= 1"):
+        load_config(config_file, tmp_path)
+
+
 def test_rejects_unknown_explicit_keys(tmp_path: Path) -> None:
     """Unknown keys in an explicit config raise ConfigError."""
     config_file = tmp_path / "scb-check.toml"

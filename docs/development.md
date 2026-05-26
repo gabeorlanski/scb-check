@@ -16,7 +16,7 @@ Implemented analysis paths:
 - `SLOC` accounting shared by verbosity, clone line counts, and rule spans.
 - Duplicate-structure detection by normalized AST hashing for all supported languages.
 - Bundled Python `ast-grep` slop patterns, plus optional local rules from `SCB_CHECK_EXTRA_SLOP_RULES`.
-- Structural rules over `ProjectIR`; the current bundled rule is Python-only `trivial-wrapper`.
+- Structural rules over `ProjectIR`; the current bundled Python rules are `trivial-wrapper` and opt-in `low-use-short-function`.
 - Cyclomatic and cognitive erosion scores for all supported languages.
 - Python source ignores for `ast-grep` and structural rule IDs.
 - Python boundary suppression for validation/normalization functions.

@@ -334,7 +334,7 @@ class PythonWalker:
             ),
             span=_node_span(self._file_path, node),
             language=Language.PYTHON,
-            roles=_function_roles(name, context),
+            roles=_function_roles(name, context, node),
             signature=signature,
             body=_body_operations(self._file_path, node, self._imports_by_name),
             references=_symbol_references(
@@ -358,6 +358,7 @@ class PythonWalker:
             cog_complexity=sum(
                 _cognitive_for_node(child, nesting=0) for child in node.children
             ),
+            max_nesting=_max_nesting_for_node(node),
         )
         self._symbols.append(symbol)
         self._visit_children(
@@ -578,22 +579,104 @@ def _class_base_names(node: Node) -> tuple[str, ...]:
     return tuple(_text(child) for child in argument_list.named_children)
 
 
-def _function_roles(name: str, context: VisitContext) -> frozenset[SymbolRole]:
-    roles: set[SymbolRole] = set()
-    if _is_dunder_name(name):
-        roles.add(SymbolRole.CONTRACT_MEMBER)
-    if context.decorators:
-        if any(decorator.startswith("property") for decorator in context.decorators):
-            roles.add(SymbolRole.COMPUTED_ATTRIBUTE)
-        else:
-            roles.add(SymbolRole.CONTRACT_MEMBER)
+def _function_roles(
+    name: str,
+    context: VisitContext,
+    node: Node,
+) -> frozenset[SymbolRole]:
+    return frozenset(
+        role
+        for role in (
+            SymbolRole.CONTRACT_MEMBER if _is_dunder_name(name) else None,
+            _decorator_role(context.decorators),
+            _inherited_override_role(name, context),
+            SymbolRole.FACTORY if _returns_constant_default_parameter(node) else None,
+        )
+        if role is not None
+    )
+
+
+def _decorator_role(decorators: tuple[str, ...]) -> SymbolRole | None:
+    if not decorators:
+        return None
+    if any(decorator.startswith("property") for decorator in decorators):
+        return SymbolRole.COMPUTED_ATTRIBUTE
+    return SymbolRole.CONTRACT_MEMBER
+
+
+def _inherited_override_role(
+    name: str,
+    context: VisitContext,
+) -> SymbolRole | None:
     if (
         context.class_context is not None
         and context.class_context.base_names
         and name not in _RECEIVER_PARAMETER_NAMES
     ):
-        roles.add(SymbolRole.INHERITED_OVERRIDE)
-    return frozenset(roles)
+        return SymbolRole.INHERITED_OVERRIDE
+    return None
+
+
+def _returns_constant_default_parameter(node: Node) -> bool:
+    returned_name = _single_returned_identifier(node)
+    return (
+        returned_name is not None
+        and returned_name in _constant_default_parameter_names(node)
+    )
+
+
+def _single_returned_identifier(node: Node) -> str | None:
+    statements = _executable_body_statements(node)
+    if len(statements) != 1:
+        return None
+    statement = statements[0]
+    if statement.type != "return_statement":
+        return None
+    value = next(
+        (child for child in statement.named_children if child.type == "identifier"),
+        None,
+    )
+    return _text(value) if value is not None else None
+
+
+def _constant_default_parameter_names(node: Node) -> frozenset[str]:
+    params = next(
+        (child for child in node.children if child.type == "parameters"),
+        None,
+    )
+    if params is None:
+        return frozenset()
+    return frozenset(
+        name
+        for child in params.named_children
+        if child.type in {"default_parameter", "typed_default_parameter"}
+        for name in [_name_from_node(child)]
+        if name is not None and _has_constantish_default(child)
+    )
+
+
+def _has_constantish_default(node: Node) -> bool:
+    default = _default_value_node(node)
+    return default is not None and _is_constantish_value_node(default)
+
+
+def _default_value_node(node: Node) -> Node | None:
+    saw_equals = False
+    for child in node.children:
+        if child.type == "=":
+            saw_equals = True
+            continue
+        if saw_equals and child.is_named:
+            return child
+    return None
+
+
+def _is_constantish_value_node(node: Node) -> bool:
+    if node.type == "identifier":
+        return _text(node).isupper()
+    return node.type in _LITERAL_TYPES | _COLLECTION_TYPES and not any(
+        child.type == "call" for child in _iter_nodes(node)
+    )
 
 
 def _is_dunder_name(name: str) -> bool:
@@ -742,9 +825,8 @@ def _symbol_references(
 ) -> tuple[ReferenceIR, ...]:
     local = _local_names(node)
     usages = tuple(
-        _reference_from_call(call, file_path, imports)
-        for call in _iter_nodes(node)
-        if call.type == "call"
+        _reference_from_call(call, file_path, imports, nesting=nesting)
+        for call, nesting in _call_nodes_with_nesting(node)
     )
     return tuple(
         usage
@@ -773,6 +855,8 @@ def _reference_from_call(
     node: Node,
     file_path: Path,
     imports: dict[str, str],
+    *,
+    nesting: int,
 ) -> ReferenceIR | None:
     name = _call_name(node)
     if name is None:
@@ -783,7 +867,20 @@ def _reference_from_call(
         resolved_name=_resolve_name(name, imports),
         kind="call",
         span=_node_span(file_path, target),
+        nesting=nesting,
     )
+
+
+def _call_nodes_with_nesting(node: Node) -> tuple[tuple[Node, int], ...]:
+    calls: list[tuple[Node, int]] = []
+    stack = [(node, 0)]
+    while stack:
+        current, nesting = stack.pop()
+        if current.type == "call":
+            calls.append((current, nesting))
+        child_nesting = nesting + 1 if current.type in _COG_FLOW_BREAK_TYPES else nesting
+        stack.extend((child, child_nesting) for child in reversed(current.children))
+    return tuple(calls)
 
 
 def _call_name(node: Node) -> str | None:
@@ -918,3 +1015,14 @@ def _cognitive_for_node(node: Node, *, nesting: int) -> int:
         )
         return 1 + nesting + nested_score
     return child_score
+
+
+def _max_nesting_for_node(node: Node) -> int:
+    max_nesting = 0
+    stack = [(node, 0)]
+    while stack:
+        current, nesting = stack.pop()
+        max_nesting = max(max_nesting, nesting)
+        child_nesting = nesting + 1 if current.type in _COG_FLOW_BREAK_TYPES else nesting
+        stack.extend((child, child_nesting) for child in current.children)
+    return max_nesting

@@ -71,6 +71,8 @@ scb-check rule RULE_ID                  # print YAML or metadata for a specific 
 
 `scb-check check` exits `0` when no findings are reported, `1` when any finding is present (clones, ast-grep hits, structural findings, or high-complexity functions), and `2` for usage errors (bad path, missing config, invalid directives).
 
+Clone detection only emits duplicated syntax blocks with at least two executable body statements. Function signatures, comments, blanks, and Python docstrings do not satisfy that threshold; displayed clone line counts and `--min-duplicate-lines` still use duplicated `SLOC` in the clone span.
+
 ## Configuration
 
 scb-check looks for `scb-check.toml` or a `pyproject.toml` containing `[tool.scb-check]`, `[tool.ruff]`, or `[tool.ty.src]`, walking upward from the current directory until it hits a `.git` root.
@@ -79,6 +81,15 @@ scb-check looks for `scb-check.toml` or a `pyproject.toml` containing `[tool.scb
 # scb-check.toml
 exclude = ["tests/fixtures/*", "vendor/**"]
 context = 1
+
+[low-use-short-function]
+enabled = true
+max-call-sites = 2
+max-function-sloc = 5
+max-inline-caller-sloc = 50
+max-inline-caller-complexity = 10
+max-inline-caller-cognitive-complexity = 10
+max-inline-call-nesting = 3
 ```
 
 ```toml
@@ -86,10 +97,14 @@ context = 1
 [tool.scb-check]
 exclude = ["tests/fixtures/*"]
 context = 2
+
+[tool.scb-check.low-use-short-function]
+enabled = true
 ```
 
 - `exclude`: list of glob patterns to skip while discovering supported source files.
 - `context`: number of surrounding source lines to show around human-readable ast-grep, structural rule, and erosion findings.
+- `low-use-short-function`: opt-in budgets for the short low-use helper rule. Set `enabled = true` to enable it, then tune `max-call-sites`, `max-function-sloc`, `max-inline-caller-sloc`, `max-inline-caller-complexity`, `max-inline-caller-cognitive-complexity`, and `max-inline-call-nesting`.
 
 Configured `exclude` patterns still apply when `--include-all` is used; only `.gitignore` file discovery is extended.
 
@@ -157,7 +172,7 @@ Rules:
 - **Tree walking**: language dispatch backed by tree-sitter grammars emits language-agnostic `ModuleIR` and semantic project context.
 - **Clone detection**: hashed AST blocks across the scanned set; two or more matching instances become a `CloneBlock`.
 - **Slop patterns**: Python ast-grep rules in `src/scb_check/resources/slop_rules/` split by category (e.g. `range(len(x))`, `dict.get(k, None)`, `isinstance` ladders, manual min/max, defensive guards).
-- **Structural rules**: typed Python classes in `src/scb_check/rules/` run over tree-walking IR. `trivial-wrapper` flags removable single-return pass-through functions (identity returns and calls that only forward parameters to another scanned function), while semantic keep reasons skip constant returns, external calls, decorated functions, dunder methods, and inherited API implementations.
+- **Structural rules**: typed Python classes in `src/scb_check/rules/` run over tree-walking IR. `trivial-wrapper` flags removable single-return pass-through functions (identity returns and calls that only forward parameters to another scanned function), while semantic keep reasons skip constant returns, default-backed value providers, external calls, decorated functions, dunder methods, and inherited API implementations. `low-use-short-function` flags short helpers with few resolved call sites only when inlining them would stay within configured caller SLOC, complexity, cognitive complexity, and nesting budgets.
 - **Extra local slop patterns**: set `SCB_CHECK_EXTRA_SLOP_RULES` to a `:`-separated list of YAML paths to layer additional rules on top of the bundled set.
 - **Complexity**: per-function cyclomatic and cognitive complexity plus SLOC, combined into mass scores for erosion metrics.
 

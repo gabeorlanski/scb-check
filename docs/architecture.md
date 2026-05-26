@@ -75,7 +75,7 @@ CLI (`cli.py` / `commands/`)
 : Python YAML-backed rule run by the `sg` subprocess. Extra local rules come from `SCB_CHECK_EXTRA_SLOP_RULES`.
 
 `clone finding`
-: Duplicate syntax block found by hashing normalized tree-sitter subtrees.
+: Duplicate syntax block found by hashing normalized tree-sitter subtrees. Candidates must contain at least two executable body statements in one duplicated body; signatures, comments, blanks, and Python docstrings do not satisfy that threshold.
 
 `structural rule`
 : Python class in `rules/` that checks typed IR subjects and returns `RuleFinding | None`.
@@ -84,13 +84,13 @@ CLI (`cli.py` / `commands/`)
 : Pydantic model for a parsed source module. It contains generic symbols, imports, references, operations, source spans, and `SLOC` lines; it does not expose raw tree-sitter nodes.
 
 `SymbolIR`
-: Language-agnostic code symbol such as a class, function, method, or value. Function-like symbols carry signatures, roles, body operations, references, `SLOC`, and complexity values.
+: Language-agnostic code symbol such as a class, function, method, or value. Function-like symbols carry signatures, roles, body operations, references, `SLOC`, complexity values, and maximum control-flow nesting depth.
 
 `ProjectIR`
 : Project-level semantic model built from parsed modules. It indexes modules, symbols, files, and derived effects.
 
 `RuleContext`
-: Query interface passed to structural rules so rules ask semantic questions instead of inspecting parser-native syntax.
+: Query interface passed to structural rules so rules ask semantic questions, including resolved project call sites, instead of inspecting parser-native syntax.
 
 `RuleFinding`
 : Fixed-field structural finding with rule ID, severity, message, span, and subject metadata.

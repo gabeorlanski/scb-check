@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, cast
 from scb_check.models import CloneBlock
 from scb_check.tree_walking.dispatch import ParsedFile
 from scb_check.tree_walking.languages.python import python_string_prefix
+from scb_check.tree_walking.languages.registry import LANGUAGE_CONFIGS
 from scb_check.tree_walking.languages.registry import (
     clone_node_types_for_language,
 )
@@ -42,6 +43,19 @@ CLONE_NODE_TYPES = frozenset(
         "match_statement",
     },
 )
+_MIN_BODY_STATEMENTS = 2
+_PYTHON_BODY_NODE_TYPES = frozenset({"block"})
+_BODY_CLAUSE_NODE_TYPES = frozenset(
+    {
+        "catch_clause",
+        "elif_clause",
+        "else_clause",
+        "except_clause",
+        "except_group_clause",
+        "finally_clause",
+    },
+)
+_HASKELL_BODY_WRAPPER_NODE_TYPES = frozenset({"do", "let_in", "local_binds"})
 
 _PYTHON_LITERAL_TOKENS = {
     "string": "$STR",
@@ -65,7 +79,7 @@ class _CloneScanContext:
     file: Path
     source_lines: tuple[str, ...]
     sloc_lines: frozenset[int]
-    min_lines: int
+    min_body_statements: int
     language: Language
 
 
@@ -92,7 +106,7 @@ class CloneCandidate:
 
 def detect_clones(
     files: tuple[ParsedFile, ...],
-    min_lines: int = 3,
+    min_body_statements: int = _MIN_BODY_STATEMENTS,
 ) -> tuple[CloneBlock, ...]:
     """Return clone blocks found in parsed source `files`."""
     candidates = sorted(
@@ -106,7 +120,7 @@ def detect_clones(
                     file=parsed.file,
                     source_lines=tuple(parsed.source.splitlines()),
                     sloc_lines=parsed.module.sloc_lines,
-                    min_lines=min_lines,
+                    min_body_statements=min_body_statements,
                     language=parsed.module.language,
                 ),
             )
@@ -192,10 +206,14 @@ def _extract_clone_candidate(
 ) -> CloneCandidate | None:
     start_line = node.start_point[0] + 1
     end_line = node.end_point[0] + 1
-    line_count = sum(
-        1 for line in context.sloc_lines if start_line <= line <= end_line
+    body_statement_count = max(
+        (
+            _body_statement_count(container, context)
+            for container in _body_containers(node, context.language)
+        ),
+        default=0,
     )
-    if line_count < context.min_lines:
+    if body_statement_count < context.min_body_statements:
         return None
 
     preview_end_line = min(end_line, start_line + 2)
@@ -205,6 +223,62 @@ def _extract_clone_candidate(
         end_line=end_line,
         group_hash=_hash_ast_subtree(node, context.language),
         first_lines=context.source_lines[start_line - 1 : preview_end_line],
+    )
+
+
+def _body_containers(node: Node, language: Language) -> tuple[Node, ...]:
+    body_types = _PYTHON_BODY_NODE_TYPES
+    if (
+        language is not Language.PYTHON
+        and (config := LANGUAGE_CONFIGS.get(language)) is not None
+    ):
+        body_types = config.body_node_types
+
+    containers = [child for child in node.children if child.type in body_types]
+    body = node.child_by_field_name("body")
+    if body is not None and not any(body is container for container in containers):
+        containers.insert(0, body)
+
+    containers.extend(
+        container
+        for clause in node.children
+        if clause.type in _BODY_CLAUSE_NODE_TYPES
+        for container in _body_containers(clause, language)
+    )
+    return tuple(containers)
+
+
+def _body_statement_count(
+    container: Node,
+    context: _CloneScanContext,
+) -> int:
+    return sum(
+        _body_statement_weight(child, context)
+        for child in container.named_children
+    )
+
+
+def _body_statement_weight(node: Node, context: _CloneScanContext) -> int:
+    if not _is_body_statement(node, context):
+        return 0
+    if (
+        context.language is Language.HASKELL
+        and node.type in _HASKELL_BODY_WRAPPER_NODE_TYPES
+    ):
+        return _body_statement_count(node, context)
+    return 1
+
+
+def _is_body_statement(node: Node, context: _CloneScanContext) -> bool:
+    start_line = node.start_point[0] + 1
+    end_line = node.end_point[0] + 1
+    return (
+        node.type not in _comment_node_types(context.language)
+        and not (
+            context.language is Language.PYTHON
+            and _is_plain_string_statement(node)
+        )
+        and any(start_line <= line <= end_line for line in context.sloc_lines)
     )
 
 

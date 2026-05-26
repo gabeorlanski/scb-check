@@ -14,6 +14,7 @@ from scb_check.tree_walking.models import ModuleIR
 from scb_check.tree_walking.models import OperationIR
 from scb_check.tree_walking.models import OperationKind
 from scb_check.tree_walking.models import ProjectIR
+from scb_check.tree_walking.models import ReferenceIR
 from scb_check.tree_walking.models import SymbolIR
 from scb_check.tree_walking.models import SymbolKind
 from scb_check.tree_walking.models import SymbolRole
@@ -27,6 +28,7 @@ _REQUIRED_API_ROLES = frozenset(
         SymbolRole.INHERITED_OVERRIDE,
         SymbolRole.COMPUTED_ATTRIBUTE,
         SymbolRole.ENTRYPOINT,
+        SymbolRole.FACTORY,
         SymbolRole.PUBLIC_API,
         SymbolRole.UNKNOWN_EXTERNAL_BINDING,
     },
@@ -219,6 +221,26 @@ class RuleContext:
         """Return True when derived effects include unresolved calls."""
         return self._has_effect(symbol, EffectKind.UNRESOLVED_CALL)
 
+    def call_sites_for_symbol(
+        self,
+        target: SymbolIR,
+    ) -> tuple[tuple[SymbolIR, ReferenceIR], ...]:
+        """Return project call sites that resolve to `target`."""
+        return tuple(
+            (caller, reference)
+            for caller in self.project.symbols_by_qualified_name.values()
+            if caller.kind in _FUNCTION_SYMBOL_KINDS
+            and caller.qualified_name != target.qualified_name
+            for reference in caller.references
+            if reference.kind == "call"
+            and _reference_targets_symbol(
+                reference,
+                caller,
+                target,
+                self._module_name_by_file,
+            )
+        )
+
     def _has_effect(self, symbol: SymbolIR, kind: EffectKind) -> bool:
         return any(effect.kind is kind for effect in self.effects_for_symbol(symbol))
 
@@ -405,3 +427,43 @@ def _argument_names(value: ValueIR) -> frozenset[str]:
     if len(names) != len(value.arguments):
         return frozenset()
     return frozenset(names)
+
+
+def _reference_targets_symbol(
+    reference: ReferenceIR,
+    caller: SymbolIR,
+    target: SymbolIR,
+    module_name_by_file: dict[Path, str],
+) -> bool:
+    return target.qualified_name in _candidate_reference_qualified_names(
+        reference,
+        caller,
+        module_name_by_file,
+    ) or _method_reference_targets_symbol(reference, caller, target)
+
+
+def _candidate_reference_qualified_names(
+    reference: ReferenceIR,
+    caller: SymbolIR,
+    module_name_by_file: dict[Path, str],
+) -> tuple[str, ...]:
+    candidates: list[str] = []
+    if reference.resolved_name is not None:
+        candidates.append(reference.resolved_name)
+    if "." not in reference.name:
+        module_name = module_name_by_file.get(caller.file)
+        if module_name is not None:
+            candidates.append(f"{module_name}.{reference.name}")
+    return tuple(dict.fromkeys(candidates))
+
+
+def _method_reference_targets_symbol(
+    reference: ReferenceIR,
+    caller: SymbolIR,
+    target: SymbolIR,
+) -> bool:
+    return (
+        target.kind is SymbolKind.METHOD
+        and caller.owner_qualified_name == target.owner_qualified_name
+        and reference.name in {target.name, f"self.{target.name}", f"cls.{target.name}"}
+    )

@@ -38,11 +38,94 @@ def test_operator_changes_are_not_clones(
         """
         def add(left, right):
             result = left + right
-            return result
+            doubled = result * 2
+            return doubled
 
         def subtract(left, right):
             result = left - right
-            return result
+            doubled = result * 2
+            return doubled
+        """,
+    )
+
+    clones = detect_clones((parsed_file,))
+
+    assert clones == ()
+
+
+def test_two_statement_utility_body_is_clone(
+    tmp_path: Path,
+) -> None:
+    """A repeated sanitize-then-return body is a clone candidate."""
+    parsed_file = _parse_source(
+        tmp_path,
+        """
+        def command_safe(value: str) -> str:
+            safe = "".join(
+                char if char.isalnum() or char in "_-" else "-"
+                for char in value
+            )
+            return safe.strip("-_") or "item"
+
+        def safe_path_part(value: str) -> str:
+            safe = "".join(
+                char if char.isalnum() or char in "._-" else "-"
+                for char in value
+            )
+            return safe.strip(".-_") or "x"
+
+        def get_safe_output_name(value: str) -> str:
+            '''Return a filesystem-safe output name.'''
+            safe = "".join(
+                char if char.isalnum() or char in "_-" else "-"
+                for char in value
+            )
+            return safe.strip("-_") or "problem"
+        """,
+    )
+
+    clones = detect_clones((parsed_file,))
+
+    assert len(clones) == 3
+    assert {clone.instance_count for clone in clones} == {3}
+
+
+def test_single_call_body_not_clone(
+    tmp_path: Path,
+) -> None:
+    """A duplicated one-statement body is not a clone candidate."""
+    parsed_file = _parse_source(
+        tmp_path,
+        """
+        class GlmAgent:
+            async def run(self, instruction, environment, context):
+                await _run_mini_swe_agent_openai_compatible(
+                    self,
+                    instruction,
+                    environment,
+                    model_id=_normalize_glm_model_id(self.model_name),
+                    env=_with_mini_swe_agent_coding_plan_env(
+                        {
+                            "MSWEA_CONFIGURED": "true",
+                            "MSWEA_COST_TRACKING": "ignore_errors",
+                        }
+                    ),
+                )
+
+        class KimiAgent:
+            async def run(self, instruction, environment, context):
+                await _run_mini_swe_agent_openai_compatible(
+                    self,
+                    instruction,
+                    environment,
+                    model_id=_normalize_kimi_model_id(self.model_name),
+                    env=_with_kimi_coding_plan_env(
+                        {
+                            "MSWEA_CONFIGURED": "true",
+                            "MSWEA_COST_TRACKING": "ignore_errors",
+                        }
+                    ),
+                )
         """,
     )
 
@@ -60,11 +143,13 @@ def test_normalizes_names_and_literals(
         """
         def first(left, right):
             result = left + 1
-            return result
+            doubled = result * 2
+            return doubled
 
         def second(alpha, beta):
             total = alpha + 2
-            return total
+            twice = total * 2
+            return twice
         """,
     )
 

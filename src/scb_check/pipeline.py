@@ -28,6 +28,7 @@ from scb_check.resources import load_thresholds
 from scb_check.resources import rules_file
 from scb_check.rules.registry import structural_rule_ids
 from scb_check.rules.runner import run_rules
+from scb_check.rules.settings import LowUseShortFunctionSettings
 from scb_check.tree_walking.directives import BoundaryDirective
 from scb_check.tree_walking.directives import IgnoreDirective
 from scb_check.tree_walking.directives import IgnoreDirectiveError
@@ -97,7 +98,12 @@ def analyze(
     files = tuple(sorted(walk_source_files(path, config, include_ignored=include_all)))
     if not files:
         raise FileNotFoundError(f"no supported source files found at {path}")
-    return analyze_files(files, include_all=include_all, disable_sg=disable_sg)
+    return analyze_files(
+        files,
+        include_all=include_all,
+        disable_sg=disable_sg,
+        low_use_short_function=config.low_use_short_function,
+    )
 
 
 def analyze_files(
@@ -105,12 +111,16 @@ def analyze_files(
     *,
     include_all: bool = False,
     disable_sg: bool = False,
+    low_use_short_function: LowUseShortFunctionSettings | None = None,
 ) -> AnalysisResult:
     """Analyze an explicit tuple of supported source `files`."""
     findings = _collect_findings(
         files,
         include_all=include_all,
         disable_sg=disable_sg,
+        low_use_short_function=(
+            low_use_short_function or LowUseShortFunctionSettings()
+        ),
     )
     flags = _build_flags(findings)
     return AnalysisResult(
@@ -124,11 +134,15 @@ def _collect_findings(
     *,
     include_all: bool,
     disable_sg: bool,
+    low_use_short_function: LowUseShortFunctionSettings,
 ) -> Findings:
     sources = _parse_sources(files)
     project = build_project(tuple(parsed.module for parsed in sources.parsed_files))
     functions = _function_symbols(tuple(project.symbols_by_qualified_name.values()))
-    structural_findings = run_rules(project)
+    structural_findings = run_rules(
+        project,
+        low_use_short_function=low_use_short_function,
+    )
     ast_hits, filtered_structural_findings = _run_and_filter_rules(
         sources,
         functions,

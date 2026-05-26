@@ -10,6 +10,7 @@ from scb_check.models import AstGrepHit
 from scb_check.pipeline import IgnoreDirectiveError
 from scb_check.pipeline import analyze
 from scb_check.pipeline import analyze_files
+from scb_check.rules.low_use_short_function import LowUseShortFunctionSettings
 
 
 def test_analysis_scans_non_python_but_runs_python_sg_only(
@@ -60,6 +61,34 @@ def test_analysis_scans_non_python_but_runs_python_sg_only(
     assert tuple(hit.file for hit in result.flags.findings.ast_grep_hits) == (
         python_file,
     )
+
+
+def test_low_use_short_function_is_opt_in(tmp_path: Path) -> None:
+    """Low-use short helper findings require explicit rule settings."""
+    source = _write_source(
+        tmp_path,
+        "sample.py",
+        """
+        def clean(value):
+            return value.strip()
+
+        def route(value):
+            cleaned = clean(value)
+            return f"<{cleaned}>"
+        """,
+    )
+
+    default_result = analyze_files((source,), disable_sg=True)
+    enabled_result = analyze_files(
+        (source,),
+        disable_sg=True,
+        low_use_short_function=LowUseShortFunctionSettings(enabled=True),
+    )
+
+    assert default_result.flags.findings.structural_findings == ()
+    assert tuple(
+        finding.rule_id for finding in enabled_result.flags.findings.structural_findings
+    ) == ("low-use-short-function",)
 
 
 def test_include_all_extends_discovery_to_gitignored_files(tmp_path: Path) -> None:
@@ -635,7 +664,8 @@ def test_detects_cross_file_clones(
         def normalize(value):
             if value:
                 return value
-            return "fallback"
+            fallback = "fallback"
+            return fallback
         """,
     )
     second = _write_source(
@@ -645,7 +675,8 @@ def test_detects_cross_file_clones(
         def normalize(value):
             if value:
                 return value
-            return "fallback"
+            fallback = "fallback"
+            return fallback
         """,
     )
 

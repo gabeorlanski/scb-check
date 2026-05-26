@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import tomllib
 from dataclasses import dataclass
+from dataclasses import field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
+
+from scb_check.rules.settings import LowUseShortFunctionSettings
 
 
 @dataclass(frozen=True, slots=True)
@@ -15,6 +18,9 @@ class Config:
     exclude: tuple[str, ...]
     base_dir: Path
     context_lines: int = 1
+    low_use_short_function: LowUseShortFunctionSettings = field(
+        default_factory=LowUseShortFunctionSettings,
+    )
 
 
 class ConfigError(ValueError):  # scbc ignore[empty-exception-subclass]
@@ -66,15 +72,17 @@ def _parse_config_file(path: Path) -> Config:
     payload = _load_toml(path)
 
     if path.name != "pyproject.toml":
-        exclude, context_lines = _scb_table(path, payload)
+        exclude, context_lines, low_use_short_function = _scb_table(path, payload)
         return Config(
             exclude=exclude,
             base_dir=path.parent,
             context_lines=context_lines,
+            low_use_short_function=low_use_short_function,
         )
 
     exclude: tuple[str, ...] = ()
     context_lines = 1
+    low_use_short_function = LowUseShortFunctionSettings()
 
     tool = payload.get("tool")
     if isinstance(tool, dict):
@@ -82,7 +90,10 @@ def _parse_config_file(path: Path) -> Config:
         if raw_scb_check is not None:
             if not isinstance(raw_scb_check, dict):
                 raise ConfigError(f"{path}: [tool.scb-check] must be a table")
-            exclude, context_lines = _scb_table(path, raw_scb_check)
+            exclude, context_lines, low_use_short_function = _scb_table(
+                path,
+                raw_scb_check,
+            )
 
         exclude = tuple(
             dict.fromkeys((*exclude, *_tool_excludes(tool))),
@@ -92,6 +103,7 @@ def _parse_config_file(path: Path) -> Config:
         exclude=exclude,
         base_dir=path.parent,
         context_lines=context_lines,
+        low_use_short_function=low_use_short_function,
     )
 
 
@@ -149,9 +161,9 @@ def _norm_pattern(raw_pattern: str) -> tuple[str, ...]:
 def _scb_table(
     path: Path,
     table: dict[str, Any],
-) -> tuple[tuple[str, ...], int]:
+) -> tuple[tuple[str, ...], int, LowUseShortFunctionSettings]:
     # scbc boundary: validates scb-check TOML fields.
-    unknown = set(table) - {"exclude", "context"}
+    unknown = set(table) - {"exclude", "context", "low-use-short-function"}
     if unknown:
         raise ConfigError(f"{path}: unknown key: {min(unknown)}")
 
@@ -167,7 +179,114 @@ def _scb_table(
     if context < 0:
         raise ConfigError(f"{path}: context must be >= 0")
 
-    return tuple(exclude), context
+    low_use_short_function = _low_use_short_function_settings(
+        path,
+        table.get("low-use-short-function", {}),
+    )
+
+    return tuple(exclude), context, low_use_short_function
+
+
+def _low_use_short_function_settings(
+    path: Path,
+    value: object,
+) -> LowUseShortFunctionSettings:
+    if value == {}:
+        return LowUseShortFunctionSettings()
+    if not isinstance(value, dict):
+        raise ConfigError(f"{path}: low-use-short-function must be a table")
+    settings = cast("dict[str, Any]", value)
+    unknown = set(settings) - {
+        "enabled",
+        "max-call-sites",
+        "max-function-sloc",
+        "max-inline-caller-sloc",
+        "max-inline-caller-complexity",
+        "max-inline-caller-cognitive-complexity",
+        "max-inline-call-nesting",
+    }
+    if unknown:
+        raise ConfigError(
+            f"{path}: unknown low-use-short-function key: {min(unknown)}",
+        )
+    return LowUseShortFunctionSettings(
+        enabled=_enabled_setting(path, settings),
+        max_call_sites=_min_int_setting(
+            path,
+            settings,
+            "max-call-sites",
+            2,
+            minimum=1,
+        ),
+        max_function_sloc=_min_int_setting(
+            path,
+            settings,
+            "max-function-sloc",
+            5,
+            minimum=1,
+        ),
+        max_inline_caller_sloc=_min_int_setting(
+            path,
+            settings,
+            "max-inline-caller-sloc",
+            50,
+            minimum=1,
+        ),
+        max_inline_caller_complexity=_min_int_setting(
+            path,
+            settings,
+            "max-inline-caller-complexity",
+            10,
+            minimum=1,
+        ),
+        max_inline_caller_cognitive_complexity=_min_int_setting(
+            path,
+            settings,
+            "max-inline-caller-cognitive-complexity",
+            10,
+            minimum=0,
+        ),
+        max_inline_call_nesting=_min_int_setting(
+            path,
+            settings,
+            "max-inline-call-nesting",
+            3,
+            minimum=0,
+        ),
+    )
+
+
+def _enabled_setting(path: Path, table: dict[str, Any]) -> bool:
+    value = table.get("enabled", False)
+    if not isinstance(value, bool):
+        raise ConfigError(f"{path}: enabled must be a boolean")
+    return value
+
+
+def _min_int_setting(
+    path: Path,
+    table: dict[str, Any],
+    key: str,
+    default: int,
+    *,
+    minimum: int,
+) -> int:
+    value = _int_setting(path, table, key, default)
+    if value < minimum:
+        raise ConfigError(f"{path}: {key} must be >= {minimum}")
+    return value
+
+
+def _int_setting(
+    path: Path,
+    table: dict[str, Any],
+    key: str,
+    default: int,
+) -> int:
+    value = table.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfigError(f"{path}: {key} must be an integer")
+    return value
 
 
 def _load_toml(path: Path) -> dict[str, Any]:
