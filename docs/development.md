@@ -25,7 +25,8 @@ Implemented analysis paths:
 
 ## Runtime contracts
 
-- Exit `0` means the run completed, even when findings were reported.
+- Exit `0` means the run completed without findings.
+- Exit `1` means the run completed and reported findings.
 - Exit `2` is for user-facing failures such as bad config, bad paths, unknown rules, invalid directives, or no discoverable supported source files.
 - Individual parse failures warn and skip the file instead of aborting the run.
 - Rust files skip Python ast-grep rules and source directives. Structural rules run when the shared facts they need are available.

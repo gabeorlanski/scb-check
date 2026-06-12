@@ -60,24 +60,22 @@ impl RustLanguageParser {
     }
 
     fn cognitive_for_node(node: Node<'_>, nesting: usize) -> usize {
-        let child_score: usize = node
-            .children(&mut node.walk())
-            .map(|child| Self::cognitive_for_node(child, nesting))
-            .sum();
         if Self::is_boolean_operation(node) {
-            return 1 + child_score;
+            return 1 + Self::child_cognitive_score(node, nesting);
         }
         if matches!(node.kind(), "break_expression" | "continue_expression") {
             return 1;
         }
         if Self::is_complexity_node(node) {
-            let nested_score: usize = node
-                .children(&mut node.walk())
-                .map(|child| Self::cognitive_for_node(child, nesting + 1))
-                .sum();
-            return 1 + nesting + nested_score;
+            return 1 + nesting + Self::child_cognitive_score(node, nesting + 1);
         }
-        child_score
+        Self::child_cognitive_score(node, nesting)
+    }
+
+    fn child_cognitive_score(node: Node<'_>, nesting: usize) -> usize {
+        node.children(&mut node.walk())
+            .map(|child| Self::cognitive_for_node(child, nesting))
+            .sum()
     }
 
     fn max_nesting_for_node(node: Node<'_>) -> usize {

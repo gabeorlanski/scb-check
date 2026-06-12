@@ -62,28 +62,30 @@ impl PythonLanguageParser {
     }
 
     fn collect_python_sloc_token_lines(source: &str, node: Node<'_>, lines: &mut BTreeSet<usize>) {
-        if node.kind() == "comment" {
-            return;
-        }
-        if BaseParser::is_string_node(node.kind()) {
-            lines.insert(node.start_position().row + 1);
-            return;
-        }
-        if node.child_count() == 0 {
-            if !node
-                .utf8_text(source.as_bytes())
-                .unwrap_or_default()
-                .trim()
-                .is_empty()
-            {
-                lines.insert(node.start_position().row + 1);
+        let mut stack = vec![node];
+        while let Some(current) = stack.pop() {
+            if current.kind() == "comment" {
+                continue;
             }
-            return;
-        }
+            if BaseParser::is_string_node(current.kind()) {
+                lines.insert(current.start_position().row + 1);
+                continue;
+            }
+            if current.child_count() == 0 {
+                if !current
+                    .utf8_text(source.as_bytes())
+                    .unwrap_or_default()
+                    .trim()
+                    .is_empty()
+                {
+                    lines.insert(current.start_position().row + 1);
+                }
+                continue;
+            }
 
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            Self::collect_python_sloc_token_lines(source, child, lines);
+            let mut cursor = current.walk();
+            let children = current.children(&mut cursor).collect::<Vec<_>>();
+            stack.extend(children.into_iter().rev());
         }
     }
 
@@ -149,24 +151,22 @@ impl PythonLanguageParser {
     }
 
     fn cognitive_for_node(node: Node<'_>, nesting: usize) -> usize {
-        let child_score: usize = node
-            .children(&mut node.walk())
-            .map(|child| Self::cognitive_for_node(child, nesting))
-            .sum();
         if node.kind() == "boolean_operator" {
-            return 1 + child_score;
+            return 1 + Self::child_cognitive_score(node, nesting);
         }
         if matches!(node.kind(), "break_statement" | "continue_statement") {
             return 1;
         }
         if Self::is_cognitive_flow_break_node(node.kind()) {
-            let nested_score: usize = node
-                .children(&mut node.walk())
-                .map(|child| Self::cognitive_for_node(child, nesting + 1))
-                .sum();
-            return 1 + nesting + nested_score;
+            return 1 + nesting + Self::child_cognitive_score(node, nesting + 1);
         }
-        child_score
+        Self::child_cognitive_score(node, nesting)
+    }
+
+    fn child_cognitive_score(node: Node<'_>, nesting: usize) -> usize {
+        node.children(&mut node.walk())
+            .map(|child| Self::cognitive_for_node(child, nesting))
+            .sum()
     }
 
     fn max_nesting_for_node(node: Node<'_>) -> usize {

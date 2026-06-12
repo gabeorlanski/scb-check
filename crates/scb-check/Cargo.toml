@@ -2,6 +2,12 @@
 name = "scb-check"
 version = "0.2.0"
 edition = "2024"
+description = "Rust CLI backend for scb-check source-code verbosity and erosion reports"
+license = "MIT"
+repository = "https://github.com/gabeorlanski/scb-check"
+readme = "../../README.md"
+keywords = ["cli", "code-analysis", "tree-sitter"]
+categories = ["command-line-utilities", "development-tools"]
 
 [lints]
 workspace = true

@@ -1,7 +1,7 @@
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::model::{AstGrepFinding, CloneBlock, Function, Report, StructuralFinding};
-use ariadne::Source as AriadneSource;
 use serde_json::json;
 
 pub(crate) fn render_json(report: &Report) -> String {
@@ -44,10 +44,11 @@ pub(crate) fn render_human(
     context_lines: usize,
 ) -> String {
     let mut entries = Vec::new();
+    let source_index = SourceIndex::new(report);
     append_clone_entries(&mut entries, report, min_duplicate_lines);
-    append_ast_grep_entries(&mut entries, report, context_lines);
-    append_structural_entries(&mut entries, report, context_lines);
-    append_complexity_entries(&mut entries, report, context_lines);
+    append_ast_grep_entries(&mut entries, report, &source_index, context_lines);
+    append_structural_entries(&mut entries, report, &source_index, context_lines);
+    append_complexity_entries(&mut entries, report, &source_index, context_lines);
     entries.sort_by(|left, right| left.key.cmp(&right.key));
     entries
         .into_iter()
@@ -62,15 +63,12 @@ fn append_clone_entries(
     min_duplicate_lines: Option<usize>,
 ) {
     for group in clone_groups(&report.clones) {
-        let Some(anchor) = group.first() else {
-            continue;
-        };
-        let line_count = clone_line_count(anchor);
+        let line_count = clone_line_count(group.anchor());
         if min_duplicate_lines.is_some_and(|minimum| line_count < minimum) {
             continue;
         }
         entries.push(RenderedEntry {
-            key: render_key(&anchor.file, anchor.start_line, 0),
+            key: render_key(&group.anchor().file, group.anchor().start_line, 0),
             text: render_clone_group(&group, line_count),
         });
     }
@@ -79,12 +77,13 @@ fn append_clone_entries(
 fn append_ast_grep_entries(
     entries: &mut Vec<RenderedEntry>,
     report: &Report,
+    source_index: &SourceIndex<'_>,
     context_lines: usize,
 ) {
     for finding in &report.ast_grep_findings {
         entries.push(RenderedEntry {
             key: render_key(&finding.file, finding.start_line, 1),
-            text: render_ast_grep(finding, report, context_lines),
+            text: render_ast_grep(finding, source_index, context_lines),
         });
     }
 }
@@ -92,12 +91,13 @@ fn append_ast_grep_entries(
 fn append_structural_entries(
     entries: &mut Vec<RenderedEntry>,
     report: &Report,
+    source_index: &SourceIndex<'_>,
     context_lines: usize,
 ) {
     for finding in &report.structural_findings {
         entries.push(RenderedEntry {
             key: render_key(&finding.file, finding.start_line, 2),
-            text: render_structural(finding, report, context_lines),
+            text: render_structural(finding, source_index, context_lines),
         });
     }
 }
@@ -105,6 +105,7 @@ fn append_structural_entries(
 fn append_complexity_entries(
     entries: &mut Vec<RenderedEntry>,
     report: &Report,
+    source_index: &SourceIndex<'_>,
     context_lines: usize,
 ) {
     for function in report
@@ -114,7 +115,7 @@ fn append_complexity_entries(
     {
         entries.push(RenderedEntry {
             key: render_key(&function.file, function.start_line, 3),
-            text: render_complexity(function, report, context_lines, false),
+            text: render_complexity(function, source_index, context_lines, false),
         });
     }
     for function in report
@@ -124,7 +125,7 @@ fn append_complexity_entries(
     {
         entries.push(RenderedEntry {
             key: render_key(&function.file, function.start_line, 4),
-            text: render_complexity(function, report, context_lines, true),
+            text: render_complexity(function, source_index, context_lines, true),
         });
     }
 }
@@ -163,7 +164,7 @@ fn syntax_by_language(report: &Report) -> serde_json::Value {
     entries.collect::<serde_json::Map<_, _>>().into()
 }
 
-fn clone_groups(clones: &[CloneBlock]) -> Vec<Vec<CloneBlock>> {
+fn clone_groups(clones: &[CloneBlock]) -> Vec<CloneGroup> {
     let mut clones = clones.to_vec();
     clones.sort_by(|left, right| {
         (
@@ -178,32 +179,61 @@ fn clone_groups(clones: &[CloneBlock]) -> Vec<Vec<CloneBlock>> {
             ))
     });
 
-    let mut groups: Vec<Vec<CloneBlock>> = Vec::new();
+    let mut groups: Vec<CloneGroup> = Vec::new();
     for clone in clones {
         if groups
             .last()
-            .and_then(|group| group.first())
-            .is_some_and(|first| first.group_hash == clone.group_hash)
+            .is_some_and(|group| group.group_hash() == clone.group_hash)
         {
-            groups
-                .last_mut()
-                .expect("last group exists after checking last")
-                .push(clone);
+            if let Some(group) = groups.last_mut() {
+                group.push(clone);
+            }
         } else {
-            groups.push(vec![clone]);
+            groups.push(CloneGroup::new(clone));
         }
     }
     groups.sort_by(|left, right| {
-        let left_anchor = left.first().expect("clone group should not be empty");
-        let right_anchor = right.first().expect("clone group should not be empty");
+        let left_anchor = left.anchor();
+        let right_anchor = right.anchor();
         (left_anchor.file.as_os_str(), left_anchor.start_line)
             .cmp(&(right_anchor.file.as_os_str(), right_anchor.start_line))
     });
     groups
 }
 
-fn render_clone_group(group: &[CloneBlock], line_count: usize) -> String {
-    let anchor = group.first().expect("clone group should not be empty");
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CloneGroup {
+    anchor: CloneBlock,
+    rest: Vec<CloneBlock>,
+}
+
+impl CloneGroup {
+    const fn new(anchor: CloneBlock) -> Self {
+        Self {
+            anchor,
+            rest: Vec::new(),
+        }
+    }
+
+    const fn anchor(&self) -> &CloneBlock {
+        &self.anchor
+    }
+
+    fn group_hash(&self) -> &str {
+        &self.anchor.group_hash
+    }
+
+    fn push(&mut self, clone: CloneBlock) {
+        self.rest.push(clone);
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &CloneBlock> {
+        std::iter::once(&self.anchor).chain(self.rest.iter())
+    }
+}
+
+fn render_clone_group(group: &CloneGroup, line_count: usize) -> String {
+    let anchor = group.anchor();
     let line_number_width = group
         .iter()
         .map(|clone| clone.end_line.to_string().len())
@@ -240,7 +270,11 @@ const fn clone_line_count(clone: &CloneBlock) -> usize {
     clone.end_line.saturating_sub(clone.start_line) + 1
 }
 
-fn render_ast_grep(finding: &AstGrepFinding, report: &Report, context_lines: usize) -> String {
+fn render_ast_grep(
+    finding: &AstGrepFinding,
+    source_index: &SourceIndex<'_>,
+    context_lines: usize,
+) -> String {
     let message = if finding.message.trim().is_empty() {
         "matches slop pattern"
     } else {
@@ -256,7 +290,7 @@ fn render_ast_grep(finding: &AstGrepFinding, report: &Report, context_lines: usi
         finding.start_col + 1
     )];
     lines.extend(source_block(
-        report,
+        source_index,
         &finding.file,
         finding.start_line,
         finding.end_line,
@@ -265,7 +299,11 @@ fn render_ast_grep(finding: &AstGrepFinding, report: &Report, context_lines: usi
     lines.join("\n")
 }
 
-fn render_structural(finding: &StructuralFinding, report: &Report, context_lines: usize) -> String {
+fn render_structural(
+    finding: &StructuralFinding,
+    source_index: &SourceIndex<'_>,
+    context_lines: usize,
+) -> String {
     let mut lines = vec![format!(
         "{}[{}]: {}\n  --> {}:{}",
         finding.rule_id,
@@ -275,7 +313,7 @@ fn render_structural(finding: &StructuralFinding, report: &Report, context_lines
         finding.start_line
     )];
     lines.extend(source_block(
-        report,
+        source_index,
         &finding.file,
         finding.start_line,
         finding.end_line,
@@ -286,7 +324,7 @@ fn render_structural(finding: &StructuralFinding, report: &Report, context_lines
 
 fn render_complexity(
     function: &Function,
-    report: &Report,
+    source_index: &SourceIndex<'_>,
     context_lines: usize,
     cognitive: bool,
 ) -> String {
@@ -306,7 +344,7 @@ fn render_complexity(
         )]
     };
     lines.extend(source_block(
-        report,
+        source_index,
         &function.file,
         function.start_line,
         function.start_line,
@@ -327,46 +365,51 @@ fn render_complexity(
 }
 
 fn source_block(
-    report: &Report,
+    source_index: &SourceIndex<'_>,
     file: &Path,
     start_line: usize,
     end_line: usize,
     context_lines: usize,
 ) -> Vec<String> {
-    let Some(source_lines) = report
-        .source_lines
-        .iter()
-        .find(|source| source.file.as_path() == file)
-    else {
+    let Some(source_lines) = source_index.lines(file) else {
         return Vec::new();
     };
-    if source_lines.lines.is_empty() {
-        return Vec::new();
-    }
-    let source = ariadne_source(&source_lines.lines);
     let first_line = start_line.saturating_sub(context_lines).max(1);
     let last_line = end_line
         .max(start_line)
         .saturating_add(context_lines)
-        .min(source_lines.lines.len());
+        .min(source_lines.len());
     let width = last_line.to_string().len();
     let mut rendered = Vec::new();
     for line_number in first_line..=last_line {
-        let text = ariadne_line_text(&source, line_number);
+        let text = source_lines
+            .get(line_number.saturating_sub(1))
+            .map(|line| line.trim_end())
+            .unwrap_or_default();
         rendered.push(format!("{line_number:>width$} | {text}"));
     }
     rendered
 }
 
-fn ariadne_source(lines: &[String]) -> AriadneSource<String> {
-    AriadneSource::from(lines.join("\n"))
+#[derive(Debug)]
+struct SourceIndex<'a> {
+    by_file: BTreeMap<&'a Path, &'a [String]>,
 }
 
-fn ariadne_line_text(source: &AriadneSource<String>, line_number: usize) -> &str {
-    let Some(line) = source.line(line_number.saturating_sub(1)) else {
-        return "";
-    };
-    source.get_line_text(line).unwrap_or("").trim_end()
+impl<'a> SourceIndex<'a> {
+    fn new(report: &'a Report) -> Self {
+        let by_file = report
+            .source_lines
+            .iter()
+            .map(|source| (source.file.as_path(), source.lines.as_slice()))
+            .collect();
+        Self { by_file }
+    }
+
+    fn lines(&self, file: &Path) -> Option<&'a [String]> {
+        let lines = self.by_file.get(file).copied()?;
+        (!lines.is_empty()).then_some(lines)
+    }
 }
 
 fn display_path(path: &Path) -> String {

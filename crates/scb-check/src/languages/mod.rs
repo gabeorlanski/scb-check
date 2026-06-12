@@ -127,29 +127,25 @@ impl BaseParser {
 
     fn collect_nodes<T>(root: Node<'_>, mut collect: impl FnMut(Node<'_>) -> Option<T>) -> Vec<T> {
         let mut items = Vec::new();
-        Self::collect_nodes_into(root, &mut collect, &mut items);
+        let mut stack = vec![root];
+        while let Some(node) = stack.pop() {
+            if let Some(item) = collect(node) {
+                items.push(item);
+            }
+            let mut cursor = node.walk();
+            let children = node.children(&mut cursor).collect::<Vec<_>>();
+            stack.extend(children.into_iter().rev());
+        }
         items
     }
 
-    fn collect_nodes_into<T>(
-        node: Node<'_>,
-        collect: &mut impl FnMut(Node<'_>) -> Option<T>,
-        items: &mut Vec<T>,
-    ) {
-        if let Some(item) = collect(node) {
-            items.push(item);
-        }
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            Self::collect_nodes_into(child, collect, items);
-        }
-    }
-
     fn count_nodes(root: Node<'_>) -> usize {
-        let mut total = 1;
-        let mut cursor = root.walk();
-        for child in root.children(&mut cursor) {
-            total += Self::count_nodes(child);
+        let mut total = 0;
+        let mut stack = vec![root];
+        while let Some(node) = stack.pop() {
+            total += 1;
+            let mut cursor = node.walk();
+            stack.extend(node.children(&mut cursor));
         }
         total
     }
@@ -315,17 +311,19 @@ fn collect_clone_tokens(
     names: &mut HashMap<String, String>,
     tokens: &mut Vec<String>,
 ) {
-    if is_clone_noise_node(source, node) {
-        return;
-    }
-    if let Some(token) = clone_leaf_token(source, node, names) {
-        tokens.push(token);
-        return;
-    }
+    let mut stack = vec![node];
+    while let Some(current) = stack.pop() {
+        if is_clone_noise_node(source, current) {
+            continue;
+        }
+        if let Some(token) = clone_leaf_token(source, current, names) {
+            tokens.push(token);
+            continue;
+        }
 
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        collect_clone_tokens(source, child, names, tokens);
+        let mut cursor = current.walk();
+        let children = current.children(&mut cursor).collect::<Vec<_>>();
+        stack.extend(children.into_iter().rev());
     }
 }
 

@@ -336,13 +336,7 @@ fn apply_threshold_map(
 }
 
 fn read_source(path: &Path) -> Result<String, std::io::Error> {
-    match fs::read_to_string(path) {
-        Ok(source) => Ok(source),
-        Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
-            fs::read(path).map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
-        }
-        Err(error) => Err(error),
-    }
+    fs::read_to_string(path)
 }
 
 trait FindingRange {
