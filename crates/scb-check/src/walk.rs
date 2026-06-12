@@ -132,3 +132,87 @@ fn is_user_excluded(path: &Path, config: &Config, exclude_set: &GlobSet) -> bool
     let relative = path.strip_prefix(&config.base_dir).unwrap_or(path);
     exclude_set.is_match(relative)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::discover_sources;
+    use crate::config::Config;
+    use crate::model::Language;
+    use crate::test_support::{test_dir, write};
+
+    #[test]
+    fn ignores_non_cutover_languages_in_directory_scan() {
+        let root = test_dir();
+        write(&root.join("sample.py"), "value = 1\n");
+        write(&root.join("sample.rs"), "fn value() -> i32 {\n    1\n}\n");
+        write(&root.join("sample.js"), "function value() { return 1 }\n");
+        write(&root.join("sample.ts"), "const value: number = 1\n");
+        write(&root.join("sample.go"), "package main\n");
+        let config = Config::default_for(&root);
+
+        let sources = discover_sources(&root, &config, false).expect("discovery should succeed");
+
+        assert_eq!(sources.len(), 2);
+        assert!(
+            sources
+                .iter()
+                .any(|source| source.language == Language::Python)
+        );
+        assert!(
+            sources
+                .iter()
+                .any(|source| source.language == Language::Rust)
+        );
+    }
+
+    #[test]
+    fn applies_scb_config_excludes() {
+        let root = test_dir();
+        fs::create_dir(root.join("generated")).expect("generated dir should be created");
+        write(&root.join("keep.py"), "value = 1\n");
+        write(&root.join("generated").join("skip.py"), "value = 2\n");
+        write(&root.join("keep.rs"), "fn value() -> i32 {\n    1\n}\n");
+        let mut config = Config::default_for(&root);
+        config.base_dir = root
+            .canonicalize()
+            .expect("test root should be canonicalizable");
+        config.exclude = vec!["generated/**".to_string()];
+
+        let sources = discover_sources(&root, &config, false).expect("discovery should succeed");
+
+        assert_eq!(sources.len(), 2);
+    }
+
+    #[test]
+    fn include_all_includes_gitignored_but_not_default_excluded_dirs() {
+        let root = test_dir();
+        write(&root.join(".gitignore"), "ignored.py\n");
+        fs::create_dir(root.join("node_modules")).expect("node_modules dir should be created");
+        write(&root.join("keep.py"), "value = 1\n");
+        write(&root.join("ignored.py"), "value = 2\n");
+        write(&root.join("node_modules").join("skip.py"), "value = 3\n");
+        let config = Config::default_for(&root);
+
+        let default_sources =
+            discover_sources(&root, &config, false).expect("discovery should succeed");
+        let include_all_sources =
+            discover_sources(&root, &config, true).expect("discovery should succeed");
+
+        assert_eq!(default_sources.len(), 1);
+        assert_eq!(include_all_sources.len(), 2);
+    }
+
+    #[test]
+    fn explicit_unsupported_file_is_usage_error() {
+        let root = test_dir();
+        let source = root.join("sample.go");
+        write(&source, "package main\n");
+        let config = Config::default_for(&root);
+
+        let error = discover_sources(&source, &config, false).expect_err("source should fail");
+
+        assert!(error.contains("not a supported source file"));
+    }
+}

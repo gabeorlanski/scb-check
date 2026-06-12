@@ -169,3 +169,58 @@ fn output_json_value(value: &str) -> Option<bool> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Command, parse_args};
+
+    #[test]
+    fn output_format_and_report_keep_last_option_wins_behavior() {
+        let human = parse_args(
+            [
+                "check",
+                "--report",
+                "--output-format",
+                "human",
+                "--disable-sg",
+                "src",
+            ]
+            .into_iter()
+            .map(str::to_string),
+        )
+        .expect("args should parse");
+        let Command::Check(human_options) = human.command else {
+            panic!("expected check command");
+        };
+        assert!(!human_options.output_json);
+
+        let json = parse_args(
+            [
+                "check",
+                "--output-format",
+                "human",
+                "--report",
+                "--disable-sg",
+                "src",
+            ]
+            .into_iter()
+            .map(str::to_string),
+        )
+        .expect("args should parse");
+        let Command::Check(json_options) = json.command else {
+            panic!("expected check command");
+        };
+        assert!(json_options.output_json);
+    }
+
+    #[test]
+    fn rule_and_version_commands_parse() {
+        let rule = parse_args(["rule", "trivial-wrapper"].into_iter().map(str::to_string))
+            .expect("rule command should parse");
+        assert_eq!(rule.command, Command::Rule("trivial-wrapper".to_string()));
+
+        let version = parse_args(std::iter::once("--version").map(str::to_string))
+            .expect("version should parse");
+        assert_eq!(version.command, Command::Version);
+    }
+}

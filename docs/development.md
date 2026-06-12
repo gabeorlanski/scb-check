@@ -49,7 +49,7 @@ Implemented analysis paths:
 1. Add or update YAML under the owning language, currently `crates/scb-check/src/languages/python/ast_grep_rules/`.
 2. Use a unique rule ID across both `ast-grep` and structural rules.
 3. Set severity and any `min_file_count` metadata deliberately.
-4. Add behavioral Rust CLI tests that exercise in-process ast-grep matching, severity filtering, count thresholds, directive filtering, and report fields.
+4. Add colocated Rust tests in the owning module that exercise in-process ast-grep matching, severity filtering, count thresholds, directive filtering, and report fields.
 5. Update README or docs if the rule changes user-facing behavior or scoring expectations.
 
 ## Adding a structural rule

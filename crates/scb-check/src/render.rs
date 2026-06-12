@@ -378,3 +378,44 @@ fn display_path(path: &Path) -> String {
         .to_string_lossy()
         .to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::render_human;
+    use crate::test_support::{analyze_dir, test_dir, write};
+
+    #[test]
+    fn human_output_orders_mixed_findings_and_renders_context_lines() {
+        let root = test_dir();
+        let config = root.join("scb-check.toml");
+        write(&config, "context = 1\n");
+        write(
+            &root.join("sample.py"),
+            r"
+def identity(value):
+    return value
+
+def noisy(items):
+    for index in range(len(items)):
+        print(items[index])
+",
+        );
+
+        let report =
+            analyze_dir(&root, false, false, Some(&config)).expect("analysis should succeed");
+        let rendered = render_human(&report, None, 1);
+
+        let structural_index = rendered
+            .find("trivial-wrapper[warning]")
+            .expect("structural finding should render");
+        let ast_index = rendered
+            .find("warning[for-range-len]")
+            .expect("ast-grep finding should render");
+        assert!(structural_index < ast_index);
+        assert!(rendered.contains("1 | def identity(value):"));
+        assert!(rendered.contains("2 |     return value"));
+        assert!(rendered.contains("4 | def noisy(items):"));
+        assert!(rendered.contains("5 |     for index in range(len(items)):"));
+        assert!(rendered.contains("6 |         print(items[index])"));
+    }
+}

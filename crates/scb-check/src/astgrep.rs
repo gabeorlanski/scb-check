@@ -119,10 +119,14 @@ fn same_finding(left: &mut AstGrepFinding, right: &mut AstGrepFinding) -> bool {
 
 pub(crate) fn ast_grep_rule_ids() -> Result<Vec<String>, String> {
     let texts = bundled_and_extra_rule_texts()?;
-    validate_rule_texts(&texts)?;
+    rule_ids_from_texts(&texts)
+}
+
+fn rule_ids_from_texts(texts: &[RuleText]) -> Result<Vec<String>, String> {
+    validate_rule_texts(texts)?;
     let mut ids = Vec::new();
     let mut seen = BTreeSet::new();
-    for text in &texts {
+    for text in texts {
         for document in split_yaml_documents(&text.yaml) {
             let Some(rule_id) = document_rule_id(document) else {
                 continue;
@@ -262,5 +266,88 @@ const fn severity_text(severity: &Severity) -> &'static str {
         Severity::Hint | Severity::Info => "info",
         Severity::Warning | Severity::Off => "warning",
         Severity::Error => "critical",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        RuleText, ast_grep_rule_document, extra_rule_text, rule_ids_from_texts, run_python_rules,
+        validate_rule_texts,
+    };
+    use crate::test_support::{test_dir, write};
+
+    #[test]
+    fn bundled_python_rules_run_in_process_and_can_be_skipped_by_callers() {
+        let findings = run_python_rules(
+            std::path::Path::new("sample.py"),
+            r"
+def item_names(items):
+    for index in range(len(items)):
+        print(items[index])
+",
+            false,
+        )
+        .expect("rules should run");
+
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding.rule_id == "for-range-len")
+        );
+    }
+
+    #[test]
+    fn duplicate_ast_grep_rule_ids_are_usage_errors() {
+        let texts = vec![RuleText {
+            name: "duplicate.yaml".to_string(),
+            yaml: r"
+---
+id: env-duplicate-rule
+language: python
+severity: warning
+message: first duplicate
+rule:
+  pattern: pass
+---
+id: env-duplicate-rule
+language: python
+severity: warning
+message: second duplicate
+rule:
+  pattern: pass
+"
+            .to_string(),
+        }];
+
+        let error = rule_ids_from_texts(&texts).expect_err("duplicate ids should fail");
+
+        assert_eq!(error, "duplicate rule id: env-duplicate-rule");
+    }
+
+    #[test]
+    fn invalid_extra_ast_grep_rule_sources_are_usage_errors() {
+        let root = test_dir();
+        let missing = root.join("missing-rules.yaml");
+        let missing_error = extra_rule_text(&missing).expect_err("missing file should fail");
+        assert!(missing_error.contains("failed to read ast-grep rule file"));
+        assert!(missing_error.contains("missing-rules.yaml"));
+
+        let invalid = root.join("invalid-rules.yaml");
+        write(&invalid, ":\n");
+        let text = extra_rule_text(&invalid).expect("invalid yaml should still be readable");
+        let invalid_error = validate_rule_texts(&[text]).expect_err("invalid yaml should fail");
+        assert!(invalid_error.contains("failed to parse ast-grep rule file"));
+        assert!(invalid_error.contains("invalid-rules.yaml"));
+    }
+
+    #[test]
+    fn ast_grep_rule_document_prints_bundled_yaml() {
+        let document = ast_grep_rule_document("chained-dict-get")
+            .expect("rule lookup should succeed")
+            .expect("rule should exist");
+
+        assert!(document.contains("id: chained-dict-get"));
+        assert!(document.contains("language: python"));
     }
 }

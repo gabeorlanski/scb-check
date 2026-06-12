@@ -400,3 +400,73 @@ fn normalize_identifier(token: &str, names: &mut HashMap<String, String>) -> Str
         .or_insert_with(|| format!("$VAR{next_index}"))
         .clone()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::parse_syntax;
+    use crate::model::Language;
+
+    #[test]
+    fn parser_finds_python_methods_and_rust_impl_methods() {
+        let python = parse_syntax(
+            Language::Python,
+            r"
+class Thing:
+    def same(self, value):
+        return value
+",
+        )
+        .expect("python should parse");
+        let rust = parse_syntax(
+            Language::Rust,
+            r"
+struct Thing;
+
+impl Thing {
+    fn same(&self, value: i32) -> i32 {
+        value
+    }
+}
+",
+        )
+        .expect("rust should parse");
+
+        assert_eq!(python.functions.len(), 1);
+        assert_eq!(python.functions[0].name, "same");
+        assert_eq!(python.functions[0].start_line, 3);
+        assert_eq!(rust.functions.len(), 1);
+        assert_eq!(rust.functions[0].name, "same");
+        assert_eq!(rust.functions[0].start_line, 5);
+    }
+
+    #[test]
+    fn complexity_metrics_ignore_branch_text_and_rust_match_arms() {
+        let python = parse_syntax(
+            Language::Python,
+            r#"
+def message():
+    text = "if elif for while match and or"
+    return text.upper()
+"#,
+        )
+        .expect("python should parse");
+        let rust = parse_syntax(
+            Language::Rust,
+            r#"
+fn classify(value: i32) -> &'static str {
+    match value {
+        0 => "if for while loop match =>",
+        1 => "one",
+        _ => "many",
+    }
+}
+"#,
+        )
+        .expect("rust should parse");
+
+        assert_eq!(python.functions[0].cyclomatic, 1);
+        assert_eq!(python.functions[0].cognitive, 0);
+        assert_eq!(rust.functions[0].cyclomatic, 2);
+        assert_eq!(rust.functions[0].cognitive, 1);
+    }
+}

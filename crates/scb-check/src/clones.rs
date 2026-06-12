@@ -90,3 +90,105 @@ fn clone_group_hash(body_lines: &[String]) -> String {
         .to_hex()
         .to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::render::{render_human, render_json};
+    use crate::test_support::{analyze_dir, test_dir, write};
+
+    #[test]
+    fn duplicate_python_and_rust_function_bodies_contribute_clone_loc() {
+        let root = test_dir();
+        write(
+            &root.join("sample.py"),
+            r"
+def first(value):
+    current = value + 1
+    doubled = current * 2
+    return doubled
+
+def second(item):
+    total = item + 2
+    twice = total * 2
+    return twice
+",
+        );
+        write(
+            &root.join("sample.rs"),
+            r"
+fn first(value: i32) -> i32 {
+    let current = value + 1;
+    let doubled = current * 2;
+    doubled
+}
+
+fn second(item: i32) -> i32 {
+    let total = item + 2;
+    let twice = total * 2;
+    twice
+}
+",
+        );
+
+        let report = analyze_dir(&root, true, false, None).expect("analysis should succeed");
+        let human = render_human(&report, None, 1);
+
+        assert!(report.has_findings());
+        assert_eq!(report.clones.len(), 4);
+        assert!(report.clone_loc > 0);
+        assert!(report.verbosity_flagged_loc > 0);
+        assert_eq!(human.matches("duplicate-structure:").count(), 2);
+        assert!(human.contains("┌─"));
+        assert!(human.contains("│"));
+        assert!(human.contains("sample.py:1"));
+        assert!(human.contains("sample.rs:1"));
+
+        let json = render_json(&report);
+        assert!(json.contains("\"clone_loc\":"));
+        assert!(!json.contains("\"clone_loc\":0"));
+        assert!(!json.contains("\"verbosity_flagged_loc\":0"));
+
+        let filtered = render_human(&report, Some(6), 1);
+        assert!(!filtered.contains("duplicate-structure:"));
+    }
+
+    #[test]
+    fn clone_fingerprints_preserve_operator_differences() {
+        let root = test_dir();
+        write(
+            &root.join("sample.py"),
+            r"
+def add(left, right):
+    result = left + right
+    doubled = result * 2
+    return doubled
+
+def subtract(left, right):
+    result = left - right
+    doubled = result * 2
+    return doubled
+",
+        );
+        write(
+            &root.join("sample.rs"),
+            r"
+fn add(left: i32, right: i32) -> i32 {
+    let result = left + right;
+    let doubled = result * 2;
+    doubled
+}
+
+fn subtract(left: i32, right: i32) -> i32 {
+    let result = left - right;
+    let doubled = result * 2;
+    doubled
+}
+",
+        );
+
+        let report = analyze_dir(&root, true, false, None).expect("analysis should succeed");
+
+        assert_eq!(report.clone_loc, 0);
+        assert_eq!(report.verbosity_flagged_loc, 0);
+    }
+}

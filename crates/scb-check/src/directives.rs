@@ -298,3 +298,105 @@ fn is_ignored(file: &Path, line: usize, rule_id: &str, ignores: &[IgnoreDirectiv
             && ignore.rule_ids.iter().any(|id| id == rule_id)
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::test_support::{analyze_dir, test_dir, write};
+
+    #[test]
+    fn source_ignore_directives_suppress_ast_grep_and_structural_findings() {
+        let root = test_dir();
+        write(
+            &root.join("sample.py"),
+            r"
+def noisy(items):
+    for index in range(len(items)):  # scbc ignore[for-range-len] intentional index access
+        print(items[index])
+
+# scbc ignore[trivial-wrapper]
+def identity(value):
+    return value
+",
+        );
+
+        let report = analyze_dir(&root, false, false, None).expect("analysis should succeed");
+        assert!(!report.has_findings());
+
+        let include_all =
+            analyze_dir(&root, false, true, None).expect("include-all analysis should succeed");
+        assert!(
+            include_all
+                .ast_grep_findings
+                .iter()
+                .any(|finding| finding.rule_id == "for-range-len")
+        );
+        assert!(
+            include_all
+                .structural_findings
+                .iter()
+                .any(|finding| finding.rule_id == "trivial-wrapper")
+        );
+    }
+
+    #[test]
+    fn boundary_directive_suppresses_ast_grep_inside_function() {
+        let root = test_dir();
+        write(
+            &root.join("sample.py"),
+            r"
+def noisy(items):
+    # scbc boundary: framework callback input shape
+    for index in range(len(items)):
+        print(items[index])
+",
+        );
+
+        let report = analyze_dir(&root, false, false, None).expect("analysis should succeed");
+        assert!(!report.has_findings());
+
+        let include_all =
+            analyze_dir(&root, false, true, None).expect("include-all analysis should succeed");
+        assert!(
+            include_all
+                .ast_grep_findings
+                .iter()
+                .any(|finding| finding.rule_id == "for-range-len")
+        );
+    }
+
+    #[test]
+    fn invalid_source_directive_is_usage_error() {
+        let root = test_dir();
+        write(
+            &root.join("sample.py"),
+            r"
+# scbc ignore[not-a-rule]
+value = 1
+",
+        );
+
+        let error = analyze_dir(&root, false, false, None).expect_err("directive should fail");
+
+        assert!(error.contains("unknown rule id: not-a-rule"));
+    }
+
+    #[test]
+    fn source_directive_text_inside_python_string_is_ignored() {
+        let root = test_dir();
+        write(
+            &root.join("sample.py"),
+            r##"
+def marker():
+    return "# scbc ignore[not-a-rule]"
+
+# scbc ignore[trivial-wrapper]
+def identity(value):
+    return value
+"##,
+        );
+
+        let report = analyze_dir(&root, true, false, None).expect("analysis should succeed");
+
+        assert!(!report.has_findings());
+    }
+}

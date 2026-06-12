@@ -357,3 +357,33 @@ fn dedupe(values: &mut Vec<String>) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::load_config;
+    use crate::test_support::{test_dir, write};
+
+    #[test]
+    fn pyproject_tool_excludes_and_low_use_settings_are_supported() {
+        let root = test_dir();
+        let config_path = root.join("pyproject.toml");
+        write(
+            &config_path,
+            r#"
+[tool.ruff]
+exclude = ["vendor/"]
+
+[tool.ty.src]
+exclude = ["fixtures/"]
+
+[tool.scb-check.low-use-short-function]
+enabled = true
+"#,
+        );
+
+        let config = load_config(Some(&config_path), &root).expect("config should parse");
+
+        assert!(config.low_use_short_function.enabled);
+        assert_eq!(config.exclude, ["vendor/**", "fixtures/**"]);
+    }
+}

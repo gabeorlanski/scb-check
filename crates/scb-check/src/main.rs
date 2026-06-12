@@ -149,3 +149,95 @@ fn run_rule(rule_id: &str) -> Result<ExitCode, String> {
     println!("{}", document.trim_end());
     Ok(ExitCode::SUCCESS)
 }
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::ffi::OsStr;
+    use std::fs;
+    use std::ops::Deref;
+    use std::path::{Path, PathBuf};
+
+    use crate::analyze::analyze;
+    use crate::config::load_config;
+    use crate::model::Report;
+    use crate::run_rule;
+    use crate::walk::discover_sources;
+
+    #[derive(Debug)]
+    pub(crate) struct TestDir {
+        temp: assert_fs::TempDir,
+    }
+
+    impl Deref for TestDir {
+        type Target = Path;
+
+        fn deref(&self) -> &Self::Target {
+            self.temp.path()
+        }
+    }
+
+    impl AsRef<OsStr> for TestDir {
+        fn as_ref(&self) -> &OsStr {
+            self.temp.path().as_ref()
+        }
+    }
+
+    impl AsRef<Path> for TestDir {
+        fn as_ref(&self) -> &Path {
+            self.temp.path()
+        }
+    }
+
+    pub(crate) fn test_dir() -> TestDir {
+        TestDir {
+            temp: assert_fs::TempDir::new().expect("test dir should be created"),
+        }
+    }
+
+    pub(crate) fn write(path: &Path, content: &str) {
+        fs::write(path, content.trim_start()).expect("fixture should be writable");
+    }
+
+    pub(crate) fn workspace_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .expect("crate should live under the workspace root")
+            .to_path_buf()
+    }
+
+    pub(crate) fn analyze_dir(
+        root: &Path,
+        disable_sg: bool,
+        include_all: bool,
+        config_path: Option<&Path>,
+    ) -> Result<Report, String> {
+        let config = load_config(config_path, root)?;
+        let files = discover_sources(root, &config, include_all)?;
+        analyze(
+            &files,
+            disable_sg,
+            include_all,
+            &config.low_use_short_function,
+        )
+    }
+
+    #[test]
+    fn run_rule_accepts_ast_grep_and_structural_rules() {
+        assert_eq!(
+            run_rule("chained-dict-get"),
+            Ok(std::process::ExitCode::SUCCESS)
+        );
+        assert_eq!(
+            run_rule("trivial-wrapper"),
+            Ok(std::process::ExitCode::SUCCESS)
+        );
+    }
+
+    #[test]
+    fn run_rule_rejects_unknown_ids() {
+        let error = run_rule("does-not-exist").expect_err("unknown rule should fail");
+
+        assert_eq!(error, "rule not found: does-not-exist");
+    }
+}

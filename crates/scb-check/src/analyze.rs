@@ -286,16 +286,31 @@ fn valid_rule_ids() -> Result<BTreeSet<String>, String> {
         .into_iter()
         .map(ToString::to_string)
         .collect();
-    if let Some(duplicate) = ast_ids.intersection(&structural_ids).next() {
+    validate_unique_rule_ids(&ast_ids, &structural_ids)?;
+    Ok(ast_ids.union(&structural_ids).cloned().collect())
+}
+
+fn validate_unique_rule_ids(
+    ast_ids: &BTreeSet<String>,
+    structural_ids: &BTreeSet<String>,
+) -> Result<(), String> {
+    if let Some(duplicate) = ast_ids.intersection(structural_ids).next() {
         return Err(format!("duplicate rule id: {duplicate}"));
     }
-    Ok(ast_ids.union(&structural_ids).cloned().collect())
+    Ok(())
 }
 
 fn apply_count_thresholds(findings: Vec<AstGrepFinding>) -> Result<Vec<AstGrepFinding>, String> {
     let thresholds = ast_grep_thresholds()?;
+    Ok(apply_threshold_map(findings, &thresholds))
+}
+
+fn apply_threshold_map(
+    findings: Vec<AstGrepFinding>,
+    thresholds: &BTreeMap<String, usize>,
+) -> Vec<AstGrepFinding> {
     if thresholds.is_empty() {
-        return Ok(findings);
+        return findings;
     }
 
     let mut counts: BTreeMap<(String, PathBuf), usize> = BTreeMap::new();
@@ -307,7 +322,7 @@ fn apply_count_thresholds(findings: Vec<AstGrepFinding>) -> Result<Vec<AstGrepFi
         }
     }
 
-    Ok(findings
+    findings
         .into_iter()
         .filter(|finding| {
             let Some(threshold) = thresholds.get(&finding.rule_id) else {
@@ -317,7 +332,7 @@ fn apply_count_thresholds(findings: Vec<AstGrepFinding>) -> Result<Vec<AstGrepFi
                 .get(&(finding.rule_id.clone(), finding.file.clone()))
                 .is_some_and(|count| count >= threshold)
         })
-        .collect())
+        .collect()
 }
 
 fn read_source(path: &Path) -> Result<String, std::io::Error> {
@@ -418,4 +433,346 @@ fn sloc_lines_for_range(
         .filter(|line| sloc_lines.contains(line))
         .map(|line| (file.to_path_buf(), line))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::path::PathBuf;
+
+    use serde_json::json;
+
+    use super::{apply_threshold_map, validate_unique_rule_ids};
+    use crate::model::AstGrepFinding;
+    use crate::render::render_json;
+    use crate::test_support::{analyze_dir, test_dir, workspace_root, write};
+
+    #[test]
+    fn reports_python_and_rust_json_contract() {
+        let root = test_dir();
+        write(
+            &root.join("sample.py"),
+            r"
+def identity(value):
+    return value
+
+def branch(value):
+    if value > 0:
+        return value
+    return 0
+",
+        );
+        write(
+            &root.join("sample.rs"),
+            r"
+fn identity(value: i32) -> i32 {
+    value
+}
+
+fn branch(value: i32) -> i32 {
+    if value > 0 {
+        return value;
+    }
+    0
+}
+",
+        );
+
+        let report = analyze_dir(&root, true, false, None).expect("analysis should succeed");
+        let rendered = render_json(&report);
+
+        for key in [
+            "verbosity",
+            "erosion",
+            "cog_erosion",
+            "files_scanned",
+            "total_loc",
+            "verbosity_flagged_loc",
+            "clone_loc",
+            "ast_grep_flagged_loc",
+            "structural_rule_loc",
+            "structural_rule_findings",
+            "total_functions",
+            "high_cc_functions",
+            "high_cog_functions",
+            "total_mass",
+            "high_cc_mass",
+            "total_cog_mass",
+            "high_cog_mass",
+            "syntax_tree_count",
+            "syntax_node_count",
+            "syntax_by_language",
+        ] {
+            assert!(
+                rendered.contains(&format!("\"{key}\"")),
+                "missing key {key}"
+            );
+        }
+        assert!(report.has_findings());
+        assert!(rendered.contains("\"files_scanned\":2"));
+        assert!(rendered.contains("\"total_functions\":4"));
+        assert!(rendered.contains("\"python\""));
+        assert!(rendered.contains("\"rust\""));
+        assert!(!rendered.contains("-0"));
+    }
+
+    #[test]
+    fn cutover_fixture_json_reports_match_expected_values() {
+        for case in cutover_json_cases() {
+            let fixture = workspace_root()
+                .join("tests/fixtures/rust_cutover_parity")
+                .join(case.name);
+            let report = analyze_dir(
+                &fixture,
+                case.disable_sg,
+                false,
+                Some(&fixture.join("scb-check.toml")),
+            )
+            .expect("analysis should succeed");
+            let actual: serde_json::Value =
+                serde_json::from_str(&render_json(&report)).expect("report should be json");
+
+            assert_eq!(report.has_findings(), case.has_findings, "{}", case.name);
+            assert_eq!(actual, case.expected, "{}", case.name);
+        }
+    }
+
+    #[test]
+    fn duplicate_ast_grep_and_structural_rule_ids_are_usage_errors() {
+        let ast_ids = BTreeSet::from(["trivial-wrapper".to_string()]);
+        let structural_ids = BTreeSet::from(["trivial-wrapper".to_string()]);
+
+        let error =
+            validate_unique_rule_ids(&ast_ids, &structural_ids).expect_err("ids should collide");
+
+        assert_eq!(error, "duplicate rule id: trivial-wrapper");
+    }
+
+    #[test]
+    fn ast_grep_min_file_count_thresholds_filter_sparse_files() {
+        let sparse = PathBuf::from("sparse.py");
+        let dense = PathBuf::from("dense.py");
+        let findings = vec![
+            ast_finding("env-threshold-pass", &sparse, 1),
+            ast_finding("env-threshold-pass", &dense, 1),
+            ast_finding("env-threshold-pass", &dense, 4),
+            ast_finding("other-rule", &sparse, 2),
+        ];
+        let thresholds = BTreeMap::from([("env-threshold-pass".to_string(), 2)]);
+
+        let kept = apply_threshold_map(findings, &thresholds);
+
+        assert_eq!(kept.len(), 3);
+        assert!(
+            kept.iter()
+                .all(|finding| finding.rule_id == "other-rule" || finding.file == dense)
+        );
+    }
+
+    fn ast_finding(rule_id: &str, file: &std::path::Path, line: usize) -> AstGrepFinding {
+        AstGrepFinding {
+            rule_id: rule_id.to_string(),
+            severity: "warning".to_string(),
+            message: "message".to_string(),
+            file: file.to_path_buf(),
+            start_line: line,
+            end_line: line,
+            start_col: 0,
+            end_col: 1,
+            matched_text: "pass".to_string(),
+        }
+    }
+
+    struct CutoverJsonCase {
+        name: &'static str,
+        disable_sg: bool,
+        has_findings: bool,
+        expected: serde_json::Value,
+    }
+
+    #[allow(
+        clippy::approx_constant,
+        clippy::too_many_lines,
+        clippy::unreadable_literal,
+        reason = "exact JSON report contract values should mirror serialized output"
+    )]
+    fn cutover_json_cases() -> Vec<CutoverJsonCase> {
+        vec![
+            CutoverJsonCase {
+                name: "scoreless_mixed",
+                disable_sg: true,
+                has_findings: false,
+                expected: json!({
+                    "ast_grep_flagged_loc": 0,
+                    "clone_loc": 0,
+                    "cog_erosion": 0.0,
+                    "erosion": 0.0,
+                    "files_scanned": 2,
+                    "high_cc_functions": 0,
+                    "high_cc_mass": 0.0,
+                    "high_cog_functions": 0,
+                    "high_cog_mass": 0.0,
+                    "structural_rule_findings": 0,
+                    "structural_rule_loc": 0,
+                    "syntax_by_language": {
+                        "python": {"node_count": 6, "tree_count": 1},
+                        "rust": {"node_count": 13, "tree_count": 1},
+                    },
+                    "syntax_node_count": 19,
+                    "syntax_tree_count": 2,
+                    "total_cog_mass": 0.0,
+                    "total_functions": 1,
+                    "total_loc": 3,
+                    "total_mass": 1.4142135623730951,
+                    "verbosity": 0.0,
+                    "verbosity_flagged_loc": 0,
+                }),
+            },
+            CutoverJsonCase {
+                name: "python_wrapper",
+                disable_sg: true,
+                has_findings: true,
+                expected: json!({
+                    "ast_grep_flagged_loc": 0,
+                    "clone_loc": 0,
+                    "cog_erosion": 0.0,
+                    "erosion": 0.0,
+                    "files_scanned": 1,
+                    "high_cc_functions": 0,
+                    "high_cc_mass": 0.0,
+                    "high_cog_functions": 0,
+                    "high_cog_mass": 0.0,
+                    "structural_rule_findings": 1,
+                    "structural_rule_loc": 2,
+                    "syntax_by_language": {
+                        "python": {"node_count": 13, "tree_count": 1},
+                    },
+                    "syntax_node_count": 13,
+                    "syntax_tree_count": 1,
+                    "total_cog_mass": 0.0,
+                    "total_functions": 1,
+                    "total_loc": 2,
+                    "total_mass": 1.4142135623730951,
+                    "verbosity": 1.0,
+                    "verbosity_flagged_loc": 2,
+                }),
+            },
+            CutoverJsonCase {
+                name: "python_clone",
+                disable_sg: true,
+                has_findings: true,
+                expected: json!({
+                    "ast_grep_flagged_loc": 0,
+                    "clone_loc": 8,
+                    "cog_erosion": 0.0,
+                    "erosion": 0.0,
+                    "files_scanned": 1,
+                    "high_cc_functions": 0,
+                    "high_cc_mass": 0.0,
+                    "high_cog_functions": 0,
+                    "high_cog_mass": 0.0,
+                    "structural_rule_findings": 0,
+                    "structural_rule_loc": 0,
+                    "syntax_by_language": {
+                        "python": {"node_count": 57, "tree_count": 1},
+                    },
+                    "syntax_node_count": 57,
+                    "syntax_tree_count": 1,
+                    "total_cog_mass": 0.0,
+                    "total_functions": 2,
+                    "total_loc": 8,
+                    "total_mass": 4.0,
+                    "verbosity": 1.0,
+                    "verbosity_flagged_loc": 8,
+                }),
+            },
+            CutoverJsonCase {
+                name: "python_low_use",
+                disable_sg: true,
+                has_findings: true,
+                expected: json!({
+                    "ast_grep_flagged_loc": 0,
+                    "clone_loc": 0,
+                    "cog_erosion": 0.0,
+                    "erosion": 0.0,
+                    "files_scanned": 1,
+                    "high_cc_functions": 0,
+                    "high_cc_mass": 0.0,
+                    "high_cog_functions": 0,
+                    "high_cog_mass": 0.0,
+                    "structural_rule_findings": 2,
+                    "structural_rule_loc": 5,
+                    "syntax_by_language": {
+                        "python": {"node_count": 42, "tree_count": 1},
+                    },
+                    "syntax_node_count": 42,
+                    "syntax_tree_count": 1,
+                    "total_cog_mass": 0.0,
+                    "total_functions": 2,
+                    "total_loc": 5,
+                    "total_mass": 3.146264369941973,
+                    "verbosity": 1.0,
+                    "verbosity_flagged_loc": 5,
+                }),
+            },
+            CutoverJsonCase {
+                name: "rust_clone",
+                disable_sg: true,
+                has_findings: true,
+                expected: json!({
+                    "ast_grep_flagged_loc": 0,
+                    "clone_loc": 8,
+                    "cog_erosion": 0.0,
+                    "erosion": 0.0,
+                    "files_scanned": 1,
+                    "high_cc_functions": 0,
+                    "high_cc_mass": 0.0,
+                    "high_cog_functions": 0,
+                    "high_cog_mass": 0.0,
+                    "structural_rule_findings": 0,
+                    "structural_rule_loc": 0,
+                    "syntax_by_language": {
+                        "rust": {"node_count": 69, "tree_count": 1},
+                    },
+                    "syntax_node_count": 69,
+                    "syntax_tree_count": 1,
+                    "total_cog_mass": 0.0,
+                    "total_functions": 2,
+                    "total_loc": 8,
+                    "total_mass": 4.0,
+                    "verbosity": 1.0,
+                    "verbosity_flagged_loc": 8,
+                }),
+            },
+            CutoverJsonCase {
+                name: "python_astgrep",
+                disable_sg: false,
+                has_findings: true,
+                expected: json!({
+                    "ast_grep_flagged_loc": 2,
+                    "clone_loc": 0,
+                    "cog_erosion": 0.0,
+                    "erosion": 0.0,
+                    "files_scanned": 1,
+                    "high_cc_functions": 0,
+                    "high_cc_mass": 0.0,
+                    "high_cog_functions": 0,
+                    "high_cog_mass": 0.0,
+                    "structural_rule_findings": 0,
+                    "structural_rule_loc": 0,
+                    "syntax_by_language": {
+                        "python": {"node_count": 38, "tree_count": 1},
+                    },
+                    "syntax_node_count": 38,
+                    "syntax_tree_count": 1,
+                    "total_cog_mass": 1.7320508075688772,
+                    "total_functions": 1,
+                    "total_loc": 3,
+                    "total_mass": 3.4641016151377544,
+                    "verbosity": 0.6666666666666666,
+                    "verbosity_flagged_loc": 2,
+                }),
+            },
+        ]
+    }
 }
