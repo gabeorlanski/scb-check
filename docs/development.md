@@ -55,11 +55,11 @@ Implemented analysis paths:
 ## Adding a structural rule
 
 1. Add a Rust rule file under `crates/scb-check/src/rules/` using the rule ID as the filename.
-2. Define a zero-sized rule struct that implements `Rule`.
-3. Define a violation struct that implements `Violation`; use `AlwaysFixableViolation` or `SometimesFixableViolation` when the finding can carry fix metadata.
-4. Keep rule metadata immutable: `id`, `severity`, `target`, and `message`.
+2. Define a diagnostic payload struct that implements `Violation`.
+3. Set immutable violation metadata: `id`, `severity`, `target`, `message`, and `FIX_AVAILABILITY`.
+4. Add checker functions that consume `RuleContext` and push `Diagnostic::new(...).into_finding()`.
 5. Operate on shared function/project facts from `RuleContext`; do not inspect language-native tree-sitter nodes.
-6. Register the rule in `crates/scb-check/src/rules/mod.rs`.
+6. Register the rule in the `Rule` enum and dispatch in `crates/scb-check/src/rules/mod.rs`.
 7. Ensure the rule ID does not collide with bundled `ast-grep` rule IDs.
 8. Test observable findings, ignore behavior, report fields, and rendering prefixes.
 

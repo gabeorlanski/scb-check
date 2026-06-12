@@ -1,35 +1,13 @@
 use crate::model::{BodyShape, Function, StructuralFinding};
-use crate::rules::base::{
-    AlwaysFixableViolation, Rule, RuleContext, StructuralRuleMetadata, Violation, always_fix_title,
-    finding,
-};
+use crate::rules::base::{Diagnostic, FixAvailability, RuleContext, RuleMetadata, Violation};
 
-pub(crate) static RULE: TrivialWrapperRule = TrivialWrapperRule;
-
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct TrivialWrapperRule;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct TrivialWrapper {
+pub(crate) struct TrivialWrapper {
     function_name: String,
 }
 
-impl Rule for TrivialWrapperRule {
-    fn metadata(&self) -> StructuralRuleMetadata {
-        TrivialWrapper::METADATA
-    }
-
-    fn check(&self, context: &RuleContext<'_>) -> Vec<StructuralFinding> {
-        context
-            .functions
-            .iter()
-            .filter_map(trivial_wrapper)
-            .collect()
-    }
-}
-
 impl Violation for TrivialWrapper {
-    const METADATA: StructuralRuleMetadata = StructuralRuleMetadata {
+    const FIX_AVAILABILITY: FixAvailability = FixAvailability::Always;
+    const METADATA: RuleMetadata = RuleMetadata {
         id: "trivial-wrapper",
         severity: "warning",
         target: "symbol",
@@ -39,12 +17,14 @@ impl Violation for TrivialWrapper {
     fn message(&self) -> String {
         format!("`{}` adds no behavior", self.function_name)
     }
+
+    fn fix_title(&self) -> Option<String> {
+        Some(format!("Inline or remove `{}`", self.function_name))
+    }
 }
 
-impl AlwaysFixableViolation for TrivialWrapper {
-    fn fix_title(&self) -> String {
-        format!("Inline or remove `{}`", self.function_name)
-    }
+pub(crate) fn check(context: &RuleContext<'_>, findings: &mut Vec<StructuralFinding>) {
+    findings.extend(context.functions.iter().filter_map(trivial_wrapper));
 }
 
 fn trivial_wrapper(function: &Function) -> Option<StructuralFinding> {
@@ -59,17 +39,16 @@ fn trivial_wrapper(function: &Function) -> Option<StructuralFinding> {
     };
 
     removable.then(|| {
-        let violation = TrivialWrapper {
-            function_name: function.name.clone(),
-        };
-        finding(
-            &violation,
+        Diagnostic::new(
+            TrivialWrapper {
+                function_name: function.name.clone(),
+            },
             function.file.clone(),
             function.start_line,
             function.end_line,
             function.name.clone(),
-            Some(always_fix_title(&violation)),
         )
+        .into_finding()
     })
 }
 

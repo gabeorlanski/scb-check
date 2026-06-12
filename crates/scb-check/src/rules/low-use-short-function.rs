@@ -1,43 +1,15 @@
 use crate::config::LowUseShortFunctionSettings;
 use crate::model::{CallSite, Function, StructuralFinding};
-use crate::rules::base::{
-    Rule, RuleContext, SometimesFixableViolation, StructuralRuleMetadata, Violation, finding,
-    sometimes_fix_title,
-};
+use crate::rules::base::{Diagnostic, FixAvailability, RuleContext, RuleMetadata, Violation};
 
-pub(crate) static RULE: LowUseShortFunctionRule = LowUseShortFunctionRule;
-
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct LowUseShortFunctionRule;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct LowUseShortFunction {
+pub(crate) struct LowUseShortFunction {
     function_name: String,
     call_sites: usize,
 }
 
-impl Rule for LowUseShortFunctionRule {
-    fn metadata(&self) -> StructuralRuleMetadata {
-        LowUseShortFunction::METADATA
-    }
-
-    fn check(&self, context: &RuleContext<'_>) -> Vec<StructuralFinding> {
-        if !context.low_use_short_function.enabled {
-            return Vec::new();
-        }
-
-        context
-            .functions
-            .iter()
-            .filter_map(|function| {
-                low_use_short_function(function, context.functions, context.low_use_short_function)
-            })
-            .collect()
-    }
-}
-
 impl Violation for LowUseShortFunction {
-    const METADATA: StructuralRuleMetadata = StructuralRuleMetadata {
+    const FIX_AVAILABILITY: FixAvailability = FixAvailability::Sometimes;
+    const METADATA: RuleMetadata = RuleMetadata {
         id: "low-use-short-function",
         severity: "info",
         target: "symbol",
@@ -55,11 +27,17 @@ impl Violation for LowUseShortFunction {
             self.function_name, self.call_sites
         )
     }
-}
 
-impl SometimesFixableViolation for LowUseShortFunction {
     fn fix_title(&self) -> Option<String> {
         Some(format!("Inline `{}`", self.function_name))
+    }
+}
+
+pub(crate) fn check(context: &RuleContext<'_>, findings: &mut Vec<StructuralFinding>) {
+    if context.low_use_short_function.enabled {
+        findings.extend(context.functions.iter().filter_map(|function| {
+            low_use_short_function(function, context.functions, context.low_use_short_function)
+        }));
     }
 }
 
@@ -80,18 +58,19 @@ fn low_use_short_function(
         return None;
     }
 
-    let violation = LowUseShortFunction {
-        function_name: function.name.clone(),
-        call_sites: call_sites.len(),
-    };
-    Some(finding(
-        &violation,
-        function.file.clone(),
-        function.start_line,
-        function.end_line,
-        function.name.clone(),
-        sometimes_fix_title(&violation),
-    ))
+    Some(
+        Diagnostic::new(
+            LowUseShortFunction {
+                function_name: function.name.clone(),
+                call_sites: call_sites.len(),
+            },
+            function.file.clone(),
+            function.start_line,
+            function.end_line,
+            function.name.clone(),
+        )
+        .into_finding(),
+    )
 }
 
 fn call_sites_for<'a>(

@@ -4,7 +4,14 @@ use crate::config::LowUseShortFunctionSettings;
 use crate::model::{Function, StructuralFinding};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct StructuralRuleMetadata {
+pub(crate) enum FixAvailability {
+    None,
+    Sometimes,
+    Always,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RuleMetadata {
     pub id: &'static str,
     pub severity: &'static str,
     pub target: &'static str,
@@ -17,56 +24,63 @@ pub(crate) struct RuleContext<'a> {
     pub low_use_short_function: &'a LowUseShortFunctionSettings,
 }
 
-pub(crate) trait Rule: Sync {
-    fn metadata(&self) -> StructuralRuleMetadata;
-    fn check(&self, context: &RuleContext<'_>) -> Vec<StructuralFinding>;
-}
-
 pub(crate) trait Violation {
-    const METADATA: StructuralRuleMetadata;
+    const METADATA: RuleMetadata;
+    const FIX_AVAILABILITY: FixAvailability = FixAvailability::None;
 
     fn message(&self) -> String;
+
+    fn fix_title(&self) -> Option<String> {
+        None
+    }
 }
 
-pub(crate) trait AlwaysFixableViolation: Violation {
-    fn fix_title(&self) -> String;
-}
-
-pub(crate) trait SometimesFixableViolation: Violation {
-    fn fix_title(&self) -> Option<String>;
-}
-
-pub(crate) fn structural_rule_document(metadata: StructuralRuleMetadata) -> String {
-    format!(
-        "id: {}\nseverity: {}\ntarget: {}\nkind: structural\nmessage: {}\n",
-        metadata.id, metadata.severity, metadata.target, metadata.message
-    )
-}
-
-pub(crate) fn finding<V: Violation>(
-    violation: &V,
+pub(crate) struct Diagnostic<V: Violation> {
+    violation: V,
     file: PathBuf,
     start_line: usize,
     end_line: usize,
     subject_name: String,
-    fix_title: Option<String>,
-) -> StructuralFinding {
-    StructuralFinding {
-        rule_id: V::METADATA.id,
-        severity: V::METADATA.severity,
-        message: violation.message(),
-        fix_title,
-        file,
-        start_line,
-        end_line,
-        subject_name,
+}
+
+impl<V: Violation> Diagnostic<V> {
+    pub(crate) const fn new(
+        violation: V,
+        file: PathBuf,
+        start_line: usize,
+        end_line: usize,
+        subject_name: String,
+    ) -> Self {
+        Self {
+            violation,
+            file,
+            start_line,
+            end_line,
+            subject_name,
+        }
+    }
+
+    pub(crate) fn into_finding(self) -> StructuralFinding {
+        let fix_title = match V::FIX_AVAILABILITY {
+            FixAvailability::None => None,
+            FixAvailability::Sometimes | FixAvailability::Always => self.violation.fix_title(),
+        };
+        StructuralFinding {
+            rule_id: V::METADATA.id,
+            severity: V::METADATA.severity,
+            message: self.violation.message(),
+            fix_title,
+            file: self.file,
+            start_line: self.start_line,
+            end_line: self.end_line,
+            subject_name: self.subject_name,
+        }
     }
 }
 
-pub(crate) fn always_fix_title<V: AlwaysFixableViolation>(violation: &V) -> String {
-    violation.fix_title()
-}
-
-pub(crate) fn sometimes_fix_title<V: SometimesFixableViolation>(violation: &V) -> Option<String> {
-    violation.fix_title()
+pub(crate) fn structural_rule_document(metadata: RuleMetadata) -> String {
+    format!(
+        "id: {}\nseverity: {}\ntarget: {}\nkind: structural\nmessage: {}\n",
+        metadata.id, metadata.severity, metadata.target, metadata.message
+    )
 }
