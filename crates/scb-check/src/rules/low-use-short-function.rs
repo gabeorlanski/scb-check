@@ -2,7 +2,7 @@ use crate::config::LowUseShortFunctionSettings;
 use crate::model::{CallSite, Function, StructuralFinding};
 use crate::rules::base::{Diagnostic, FixAvailability, RuleContext, RuleMetadata, Violation};
 
-pub(crate) struct LowUseShortFunction {
+pub struct LowUseShortFunction {
     function_name: String,
     call_sites: usize,
 }
@@ -33,7 +33,7 @@ impl Violation for LowUseShortFunction {
     }
 }
 
-pub(crate) fn check(context: &RuleContext<'_>, findings: &mut Vec<StructuralFinding>) {
+pub fn check(context: &RuleContext<'_>, findings: &mut Vec<StructuralFinding>) {
     if context.low_use_short_function.enabled {
         findings.extend(context.functions.iter().filter_map(|function| {
             low_use_short_function(function, context.functions, context.low_use_short_function)

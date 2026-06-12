@@ -1,26 +1,17 @@
 //! Rust implementation of the `scb-check` command-line interface.
 
-#![expect(
-    clippy::multiple_crate_versions,
-    reason = "Indirect ast-grep/toml dependencies currently resolve two winnow versions; no direct dependency pin fixes this without upstream churn."
-)]
-#![expect(
-    clippy::redundant_pub_crate,
-    reason = "`unreachable_pub` requires crate-private internals; private modules with sibling access intentionally use `pub(crate)`."
-)]
-
-pub(crate) mod analyze;
-pub(crate) mod args;
-pub(crate) mod astgrep;
-pub(crate) mod clones;
-pub(crate) mod config;
-pub(crate) mod directives;
-pub(crate) mod facts;
-pub(crate) mod languages;
-pub(crate) mod model;
-pub(crate) mod render;
-pub(crate) mod rules;
-pub(crate) mod walk;
+mod analyze;
+mod args;
+mod astgrep;
+mod clones;
+mod config;
+mod directives;
+mod facts;
+mod languages;
+mod model;
+mod render;
+mod rules;
+mod walk;
 
 use std::process::ExitCode;
 
@@ -169,7 +160,7 @@ fn run_rule(rule_id: &str) -> Result<ExitCode, String> {
 }
 
 #[cfg(test)]
-pub(crate) mod test_support {
+mod test_support {
     use std::ffi::OsStr;
     use std::fs;
     use std::ops::Deref;
@@ -181,7 +172,7 @@ pub(crate) mod test_support {
     use crate::walk::discover_sources;
 
     #[derive(Debug)]
-    pub(crate) struct TestDir {
+    pub struct TestDir {
         temp: assert_fs::TempDir,
     }
 
@@ -205,17 +196,17 @@ pub(crate) mod test_support {
         }
     }
 
-    pub(crate) fn test_dir() -> TestDir {
+    pub fn test_dir() -> TestDir {
         TestDir {
             temp: assert_fs::TempDir::new().expect("test dir should be created"),
         }
     }
 
-    pub(crate) fn write(path: &Path, content: &str) {
+    pub fn write(path: &Path, content: &str) {
         fs::write(path, content.trim_start()).expect("fixture should be writable");
     }
 
-    pub(crate) fn workspace_root() -> PathBuf {
+    pub fn workspace_root() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .ancestors()
             .nth(2)
@@ -223,7 +214,7 @@ pub(crate) mod test_support {
             .to_path_buf()
     }
 
-    pub(crate) fn analyze_dir(
+    pub fn analyze_dir(
         root: &Path,
         disable_sg: bool,
         include_all: bool,

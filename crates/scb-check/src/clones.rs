@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use crate::model::{CloneBlock, Function};
 
 #[derive(Debug, Clone)]
-pub(crate) struct CloneCandidate {
+pub struct CloneCandidate {
     file: PathBuf,
     start_line: usize,
     end_line: usize,
@@ -12,7 +12,7 @@ pub(crate) struct CloneCandidate {
     first_lines: Vec<String>,
 }
 
-pub(crate) fn function_clone_candidate(
+pub fn function_clone_candidate(
     function: &Function,
     fingerprint: &[String],
     lines: &[&str],
@@ -42,7 +42,7 @@ pub(crate) fn function_clone_candidate(
     })
 }
 
-pub(crate) fn detect_clones(candidates: Vec<CloneCandidate>) -> Vec<CloneBlock> {
+pub fn detect_clones(candidates: Vec<CloneCandidate>) -> Vec<CloneBlock> {
     let mut groups: BTreeMap<String, Vec<CloneCandidate>> = BTreeMap::new();
     for candidate in candidates {
         groups

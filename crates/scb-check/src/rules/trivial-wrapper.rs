@@ -1,7 +1,7 @@
 use crate::model::{BodyShape, Function, StructuralFinding};
 use crate::rules::base::{Diagnostic, FixAvailability, RuleContext, RuleMetadata, Violation};
 
-pub(crate) struct TrivialWrapper {
+pub struct TrivialWrapper {
     function_name: String,
 }
 
@@ -23,7 +23,7 @@ impl Violation for TrivialWrapper {
     }
 }
 
-pub(crate) fn check(context: &RuleContext<'_>, findings: &mut Vec<StructuralFinding>) {
+pub fn check(context: &RuleContext<'_>, findings: &mut Vec<StructuralFinding>) {
     findings.extend(context.functions.iter().filter_map(trivial_wrapper));
 }
 

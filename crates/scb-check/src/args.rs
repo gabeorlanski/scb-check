@@ -3,26 +3,26 @@ use std::path::PathBuf;
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CheckOptions {
-    pub(crate) path: PathBuf,
-    pub(crate) output_json: bool,
-    pub(crate) include_all: bool,
-    pub(crate) disable_sg: bool,
-    pub(crate) min_duplicate_lines: Option<usize>,
-    pub(crate) config_path: Option<PathBuf>,
-    pub(crate) verbosity: u8,
+pub struct CheckOptions {
+    pub path: PathBuf,
+    pub output_json: bool,
+    pub include_all: bool,
+    pub disable_sg: bool,
+    pub min_duplicate_lines: Option<usize>,
+    pub config_path: Option<PathBuf>,
+    pub verbosity: u8,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Command {
+pub enum Command {
     Check(CheckOptions),
     Rule(String),
     Version,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Cli {
-    pub(crate) command: Command,
+pub struct Cli {
+    pub command: Command,
 }
 
 #[derive(Debug, Parser)]
@@ -67,7 +67,7 @@ enum OutputFormat {
     Json,
 }
 
-pub(crate) fn parse_args<I>(raw_args: I) -> Result<Cli, String>
+pub fn parse_args<I>(raw_args: I) -> Result<Cli, String>
 where
     I: IntoIterator<Item = String>,
 {

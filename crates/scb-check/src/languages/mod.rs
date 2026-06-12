@@ -4,39 +4,39 @@ use tree_sitter::{Node, Tree};
 
 use crate::model::Language;
 
-pub(crate) mod python;
-pub(crate) mod rust;
+mod python;
+mod rust;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CommentSpan {
-    pub(crate) line: usize,
-    pub(crate) column: usize,
-    pub(crate) end_line: usize,
-    pub(crate) end_column: usize,
-    pub(crate) text: String,
+pub struct CommentSpan {
+    pub line: usize,
+    pub column: usize,
+    pub end_line: usize,
+    pub end_column: usize,
+    pub text: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct FunctionSpan {
-    pub(crate) name: String,
-    pub(crate) start_line: usize,
-    pub(crate) end_line: usize,
-    pub(crate) signature: String,
-    pub(crate) cyclomatic: usize,
-    pub(crate) cognitive: usize,
-    pub(crate) max_nesting: usize,
-    pub(crate) clone_fingerprint: Vec<String>,
+pub struct FunctionSpan {
+    pub name: String,
+    pub start_line: usize,
+    pub end_line: usize,
+    pub signature: String,
+    pub cyclomatic: usize,
+    pub cognitive: usize,
+    pub max_nesting: usize,
+    pub clone_fingerprint: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ParsedSyntax {
-    pub(crate) functions: Vec<FunctionSpan>,
-    pub(crate) comments: Vec<CommentSpan>,
-    pub(crate) sloc_lines: BTreeSet<usize>,
-    pub(crate) node_count: usize,
+pub struct ParsedSyntax {
+    pub functions: Vec<FunctionSpan>,
+    pub comments: Vec<CommentSpan>,
+    pub sloc_lines: BTreeSet<usize>,
+    pub node_count: usize,
 }
 
-pub(crate) trait LanguageParser {
+pub trait LanguageParser {
     fn label(&self) -> &'static str;
     fn tree_sitter_language(&self) -> tree_sitter::Language;
     fn is_function_node(&self, kind: &str) -> bool;
@@ -54,7 +54,7 @@ pub(crate) trait LanguageParser {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct BaseParser {
+pub struct BaseParser {
     label: &'static str,
     language: tree_sitter::Language,
 }
@@ -125,10 +125,6 @@ impl BaseParser {
         })
     }
 
-    #[expect(
-        clippy::needless_collect,
-        reason = "tree-sitter child iterators are not DoubleEndedIterator; collecting is required to reverse children while preserving DFS order."
-    )]
     fn collect_nodes<T>(root: Node<'_>, mut collect: impl FnMut(Node<'_>) -> Option<T>) -> Vec<T> {
         let mut items = Vec::new();
         let mut stack = vec![root];
@@ -136,9 +132,7 @@ impl BaseParser {
             if let Some(item) = collect(node) {
                 items.push(item);
             }
-            let mut cursor = node.walk();
-            let children = node.children(&mut cursor).collect::<Vec<_>>();
-            stack.extend(children.into_iter().rev());
+            push_children_reverse(node, &mut stack);
         }
         items
     }
@@ -156,7 +150,7 @@ impl BaseParser {
 }
 
 impl BaseParser {
-    pub(crate) fn function_span(
+    pub fn function_span(
         source: &str,
         node: Node<'_>,
         cyclomatic: usize,
@@ -183,7 +177,7 @@ impl BaseParser {
         }
     }
 
-    pub(crate) fn generic_sloc_lines(source: &str, comments: &[CommentSpan]) -> BTreeSet<usize> {
+    pub fn generic_sloc_lines(source: &str, comments: &[CommentSpan]) -> BTreeSet<usize> {
         let source_lines: Vec<&str> = source.lines().collect();
         let comment_intervals = comment_intervals_by_line(comments);
         source_lines
@@ -202,14 +196,14 @@ impl BaseParser {
             .collect()
     }
 
-    pub(crate) fn is_string_node(kind: &str) -> bool {
+    pub fn is_string_node(kind: &str) -> bool {
         matches!(
             kind,
             "string" | "string_literal" | "raw_string_literal" | "interpreted_string_literal"
         )
     }
 
-    pub(crate) fn is_string_statement_text(source: &str, node: Node<'_>) -> bool {
+    pub fn is_string_statement_text(source: &str, node: Node<'_>) -> bool {
         let text = node.utf8_text(source.as_bytes()).unwrap_or_default().trim();
         (text.starts_with("\"\"\"") && text.ends_with("\"\"\""))
             || (text.starts_with("'''") && text.ends_with("'''"))
@@ -238,7 +232,7 @@ impl BaseParser {
     }
 }
 
-pub(crate) fn parse_syntax(language: Language, source: &str) -> Result<ParsedSyntax, String> {
+pub fn parse_syntax(language: Language, source: &str) -> Result<ParsedSyntax, String> {
     match language {
         Language::Python => python::parser::PYTHON_PARSER.parse(source),
         Language::Rust => rust::parser::RUST_PARSER.parse(source),
@@ -309,10 +303,6 @@ fn clone_statement_fingerprint(
     (!tokens.is_empty()).then(|| tokens.join(""))
 }
 
-#[expect(
-    clippy::needless_collect,
-    reason = "tree-sitter child iterators are not DoubleEndedIterator; collecting is required to reverse children while preserving clone-token order."
-)]
 fn collect_clone_tokens(
     source: &str,
     node: Node<'_>,
@@ -329,9 +319,18 @@ fn collect_clone_tokens(
             continue;
         }
 
-        let mut cursor = current.walk();
-        let children = current.children(&mut cursor).collect::<Vec<_>>();
-        stack.extend(children.into_iter().rev());
+        push_children_reverse(current, &mut stack);
+    }
+}
+
+fn push_children_reverse<'tree>(node: Node<'tree>, stack: &mut Vec<Node<'tree>>) {
+    for index in (0..node.child_count()).rev() {
+        let Ok(index) = u32::try_from(index) else {
+            continue;
+        };
+        if let Some(child) = node.child(index) {
+            stack.push(child);
+        }
     }
 }
 

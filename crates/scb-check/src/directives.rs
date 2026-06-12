@@ -5,25 +5,25 @@ use crate::languages::CommentSpan;
 use crate::model::{AstGrepFinding, Function, StructuralFinding};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct IgnoreDirective {
+pub struct IgnoreDirective {
     file: PathBuf,
     target_line: usize,
     rule_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct BoundaryDirective {
+pub struct BoundaryDirective {
     file: PathBuf,
     directive_line: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ParsedDirectives {
-    pub(crate) ignores: Vec<IgnoreDirective>,
-    pub(crate) boundaries: Vec<BoundaryDirective>,
+pub struct ParsedDirectives {
+    pub ignores: Vec<IgnoreDirective>,
+    pub boundaries: Vec<BoundaryDirective>,
 }
 
-pub(crate) fn parse_source_directives(
+pub fn parse_source_directives(
     path: &Path,
     source: &str,
     comments: &[CommentSpan],
@@ -95,7 +95,7 @@ fn parse_directive_comment(
     Ok(None)
 }
 
-pub(crate) fn filter_ast_grep_findings(
+pub fn filter_ast_grep_findings(
     findings: Vec<AstGrepFinding>,
     ignores: &[IgnoreDirective],
     boundaries: &[BoundaryDirective],
@@ -109,7 +109,7 @@ pub(crate) fn filter_ast_grep_findings(
         .collect())
 }
 
-pub(crate) fn filter_structural_findings(
+pub fn filter_structural_findings(
     findings: Vec<StructuralFinding>,
     ignores: &[IgnoreDirective],
 ) -> Vec<StructuralFinding> {

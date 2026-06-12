@@ -4,7 +4,7 @@ use std::path::Path;
 use crate::model::{AstGrepFinding, CloneBlock, Function, Report, StructuralFinding};
 use serde_json::json;
 
-pub(crate) fn render_json(report: &Report) -> String {
+pub fn render_json(report: &Report) -> String {
     json!({
         "verbosity": json_number(report.verbosity()),
         "erosion": json_number(report.erosion()),
@@ -38,7 +38,7 @@ fn json_number(value: f64) -> f64 {
     }
 }
 
-pub(crate) fn render_human(
+pub fn render_human(
     report: &Report,
     min_duplicate_lines: Option<usize>,
     context_lines: usize,

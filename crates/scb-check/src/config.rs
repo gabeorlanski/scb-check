@@ -5,22 +5,22 @@ use toml::Value;
 use toml::map::Map;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Config {
-    pub(crate) exclude: Vec<String>,
-    pub(crate) base_dir: PathBuf,
-    pub(crate) context_lines: usize,
-    pub(crate) low_use_short_function: LowUseShortFunctionSettings,
+pub struct Config {
+    pub exclude: Vec<String>,
+    pub base_dir: PathBuf,
+    pub context_lines: usize,
+    pub low_use_short_function: LowUseShortFunctionSettings,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct LowUseShortFunctionSettings {
-    pub(crate) enabled: bool,
-    pub(crate) max_call_sites: usize,
-    pub(crate) max_function_sloc: usize,
-    pub(crate) max_inline_caller_sloc: usize,
-    pub(crate) max_inline_caller_complexity: usize,
-    pub(crate) max_inline_caller_cognitive_complexity: usize,
-    pub(crate) max_inline_call_nesting: usize,
+pub struct LowUseShortFunctionSettings {
+    pub enabled: bool,
+    pub max_call_sites: usize,
+    pub max_function_sloc: usize,
+    pub max_inline_caller_sloc: usize,
+    pub max_inline_caller_complexity: usize,
+    pub max_inline_caller_cognitive_complexity: usize,
+    pub max_inline_call_nesting: usize,
 }
 
 impl Default for LowUseShortFunctionSettings {
@@ -38,7 +38,7 @@ impl Default for LowUseShortFunctionSettings {
 }
 
 impl Config {
-    pub(crate) fn default_for(cwd: &Path) -> Self {
+    pub fn default_for(cwd: &Path) -> Self {
         Self {
             exclude: Vec::new(),
             base_dir: cwd.to_path_buf(),
@@ -48,7 +48,7 @@ impl Config {
     }
 }
 
-pub(crate) fn load_config(override_path: Option<&Path>, cwd: &Path) -> Result<Config, String> {
+pub fn load_config(override_path: Option<&Path>, cwd: &Path) -> Result<Config, String> {
     if let Some(path) = override_path {
         if !path.exists() {
             return Err(format!("config path does not exist: {}", path.display()));

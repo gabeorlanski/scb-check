@@ -4,10 +4,10 @@ use tree_sitter::Node;
 
 use crate::languages::{BaseParser, CommentSpan, FunctionSpan, LanguageParser};
 
-pub(crate) static RUST_PARSER: RustLanguageParser = RustLanguageParser;
+pub static RUST_PARSER: RustLanguageParser = RustLanguageParser;
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct RustLanguageParser;
+pub struct RustLanguageParser;
 
 impl LanguageParser for RustLanguageParser {
     fn label(&self) -> &'static str {

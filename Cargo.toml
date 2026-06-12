@@ -6,7 +6,6 @@ resolver = "3"
 missing_docs = "warn"
 missing_debug_implementations = "warn"
 unsafe_code = "deny"
-unreachable_pub = "deny"
 
 [workspace.lints.clippy]
 all = { level = "deny", priority = -1 }

@@ -1,4 +1,4 @@
-pub(crate) mod base;
+pub mod base;
 
 #[path = "low-use-short-function.rs"]
 mod low_use_short_function;
@@ -10,7 +10,7 @@ use crate::model::{Function, StructuralFinding};
 use crate::rules::base::{RuleContext, RuleMetadata, Violation};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Rule {
+pub enum Rule {
     TrivialWrapper,
     LowUseShortFunction,
 }
@@ -37,18 +37,18 @@ impl Rule {
     }
 }
 
-pub(crate) fn structural_rule_ids() -> Vec<&'static str> {
+pub fn structural_rule_ids() -> Vec<&'static str> {
     Rule::all().iter().map(|rule| rule.metadata().id).collect()
 }
 
-pub(crate) fn structural_rule_document(rule_id: &str) -> Option<String> {
+pub fn structural_rule_document(rule_id: &str) -> Option<String> {
     let rule = Rule::all()
         .iter()
         .find(|rule| rule.metadata().id == rule_id)?;
     Some(base::structural_rule_document(rule.metadata()))
 }
 
-pub(crate) fn run_structural_rules(
+pub fn run_structural_rules(
     functions: &[Function],
     low_use_short_function: &LowUseShortFunctionSettings,
 ) -> Vec<StructuralFinding> {

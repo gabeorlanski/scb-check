@@ -50,7 +50,7 @@ struct RuleText {
     yaml: String,
 }
 
-pub(crate) fn run_python_rules(
+pub fn run_python_rules(
     path: &Path,
     source: &str,
     include_all: bool,
@@ -117,7 +117,7 @@ fn same_finding(left: &mut AstGrepFinding, right: &mut AstGrepFinding) -> bool {
         && left.matched_text == right.matched_text
 }
 
-pub(crate) fn ast_grep_rule_ids() -> Result<Vec<String>, String> {
+pub fn ast_grep_rule_ids() -> Result<Vec<String>, String> {
     let texts = bundled_and_extra_rule_texts()?;
     rule_ids_from_texts(&texts)
 }
@@ -140,7 +140,7 @@ fn rule_ids_from_texts(texts: &[RuleText]) -> Result<Vec<String>, String> {
     Ok(ids)
 }
 
-pub(crate) fn ast_grep_thresholds() -> Result<BTreeMap<String, usize>, String> {
+pub fn ast_grep_thresholds() -> Result<BTreeMap<String, usize>, String> {
     let texts = bundled_and_extra_rule_texts()?;
     validate_rule_texts(&texts)?;
     let mut thresholds = BTreeMap::new();
@@ -157,7 +157,7 @@ pub(crate) fn ast_grep_thresholds() -> Result<BTreeMap<String, usize>, String> {
     Ok(thresholds)
 }
 
-pub(crate) fn ast_grep_rule_document(rule_id: &str) -> Result<Option<String>, String> {
+pub fn ast_grep_rule_document(rule_id: &str) -> Result<Option<String>, String> {
     let texts = bundled_and_extra_rule_texts()?;
     validate_rule_texts(&texts)?;
     for text in &texts {

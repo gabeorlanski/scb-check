@@ -4,27 +4,27 @@ use crate::config::LowUseShortFunctionSettings;
 use crate::model::{Function, StructuralFinding};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum FixAvailability {
+pub enum FixAvailability {
     None,
     Sometimes,
     Always,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct RuleMetadata {
-    pub(crate) id: &'static str,
-    pub(crate) severity: &'static str,
-    pub(crate) target: &'static str,
-    pub(crate) message: &'static str,
+pub struct RuleMetadata {
+    pub id: &'static str,
+    pub severity: &'static str,
+    pub target: &'static str,
+    pub message: &'static str,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct RuleContext<'a> {
-    pub(crate) functions: &'a [Function],
-    pub(crate) low_use_short_function: &'a LowUseShortFunctionSettings,
+pub struct RuleContext<'a> {
+    pub functions: &'a [Function],
+    pub low_use_short_function: &'a LowUseShortFunctionSettings,
 }
 
-pub(crate) trait Violation {
+pub trait Violation {
     const METADATA: RuleMetadata;
     const FIX_AVAILABILITY: FixAvailability = FixAvailability::None;
 
@@ -35,7 +35,7 @@ pub(crate) trait Violation {
     }
 }
 
-pub(crate) struct Diagnostic<V: Violation> {
+pub struct Diagnostic<V: Violation> {
     violation: V,
     file: PathBuf,
     start_line: usize,
@@ -44,7 +44,7 @@ pub(crate) struct Diagnostic<V: Violation> {
 }
 
 impl<V: Violation> Diagnostic<V> {
-    pub(crate) const fn new(
+    pub const fn new(
         violation: V,
         file: PathBuf,
         start_line: usize,
@@ -60,7 +60,7 @@ impl<V: Violation> Diagnostic<V> {
         }
     }
 
-    pub(crate) fn into_finding(self) -> StructuralFinding {
+    pub fn into_finding(self) -> StructuralFinding {
         let fix_title = match V::FIX_AVAILABILITY {
             FixAvailability::None => None,
             FixAvailability::Sometimes | FixAvailability::Always => self.violation.fix_title(),
@@ -78,7 +78,7 @@ impl<V: Violation> Diagnostic<V> {
     }
 }
 
-pub(crate) fn structural_rule_document(metadata: RuleMetadata) -> String {
+pub fn structural_rule_document(metadata: RuleMetadata) -> String {
     format!(
         "id: {}\nseverity: {}\ntarget: {}\nkind: structural\nmessage: {}\n",
         metadata.id, metadata.severity, metadata.target, metadata.message

@@ -4,10 +4,10 @@ use tree_sitter::Node;
 
 use crate::languages::{BaseParser, CommentSpan, FunctionSpan, LanguageParser};
 
-pub(crate) static PYTHON_PARSER: PythonLanguageParser = PythonLanguageParser;
+pub static PYTHON_PARSER: PythonLanguageParser = PythonLanguageParser;
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct PythonLanguageParser;
+pub struct PythonLanguageParser;
 
 impl LanguageParser for PythonLanguageParser {
     fn label(&self) -> &'static str {
@@ -61,10 +61,6 @@ impl PythonLanguageParser {
         lines
     }
 
-    #[expect(
-        clippy::needless_collect,
-        reason = "tree-sitter child iterators are not DoubleEndedIterator; collecting is required to reverse children while preserving token order."
-    )]
     fn collect_python_sloc_token_lines(source: &str, node: Node<'_>, lines: &mut BTreeSet<usize>) {
         let mut stack = vec![node];
         while let Some(current) = stack.pop() {
@@ -87,9 +83,14 @@ impl PythonLanguageParser {
                 continue;
             }
 
-            let mut cursor = current.walk();
-            let children = current.children(&mut cursor).collect::<Vec<_>>();
-            stack.extend(children.into_iter().rev());
+            for index in (0..current.child_count()).rev() {
+                let Ok(index) = u32::try_from(index) else {
+                    continue;
+                };
+                if let Some(child) = current.child(index) {
+                    stack.push(child);
+                }
+            }
         }
     }
 

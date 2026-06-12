@@ -43,7 +43,7 @@ struct ProjectFacts {
     syntax_counts: BTreeMap<Language, (usize, usize)>,
 }
 
-pub(crate) fn analyze(
+pub fn analyze(
     files: &[SourceFile],
     disable_sg: bool,
     include_all: bool,
@@ -584,189 +584,180 @@ fn branch(value: i32) -> i32 {
         expected: serde_json::Value,
     }
 
-    #[expect(
-        clippy::approx_constant,
-        clippy::too_many_lines,
-        clippy::unreadable_literal,
-        reason = "exact JSON report contract values should mirror serialized output"
-    )]
     fn cutover_json_cases() -> Vec<CutoverJsonCase> {
         vec![
-            CutoverJsonCase {
-                name: "scoreless_mixed",
-                disable_sg: true,
-                has_findings: false,
-                expected: json!({
-                    "ast_grep_flagged_loc": 0,
-                    "clone_loc": 0,
-                    "cog_erosion": 0.0,
-                    "erosion": 0.0,
-                    "files_scanned": 2,
-                    "high_cc_functions": 0,
-                    "high_cc_mass": 0.0,
-                    "high_cog_functions": 0,
-                    "high_cog_mass": 0.0,
-                    "structural_rule_findings": 0,
-                    "structural_rule_loc": 0,
-                    "syntax_by_language": {
-                        "python": {"node_count": 6, "tree_count": 1},
-                        "rust": {"node_count": 13, "tree_count": 1},
-                    },
-                    "syntax_node_count": 19,
-                    "syntax_tree_count": 2,
-                    "total_cog_mass": 0.0,
-                    "total_functions": 1,
-                    "total_loc": 3,
-                    "total_mass": 1.4142135623730951,
-                    "verbosity": 0.0,
-                    "verbosity_flagged_loc": 0,
-                }),
-            },
-            CutoverJsonCase {
-                name: "python_wrapper",
-                disable_sg: true,
-                has_findings: true,
-                expected: json!({
-                    "ast_grep_flagged_loc": 0,
-                    "clone_loc": 0,
-                    "cog_erosion": 0.0,
-                    "erosion": 0.0,
-                    "files_scanned": 1,
-                    "high_cc_functions": 0,
-                    "high_cc_mass": 0.0,
-                    "high_cog_functions": 0,
-                    "high_cog_mass": 0.0,
-                    "structural_rule_findings": 1,
-                    "structural_rule_loc": 2,
-                    "syntax_by_language": {
-                        "python": {"node_count": 13, "tree_count": 1},
-                    },
-                    "syntax_node_count": 13,
-                    "syntax_tree_count": 1,
-                    "total_cog_mass": 0.0,
-                    "total_functions": 1,
-                    "total_loc": 2,
-                    "total_mass": 1.4142135623730951,
-                    "verbosity": 1.0,
-                    "verbosity_flagged_loc": 2,
-                }),
-            },
-            CutoverJsonCase {
-                name: "python_clone",
-                disable_sg: true,
-                has_findings: true,
-                expected: json!({
-                    "ast_grep_flagged_loc": 0,
-                    "clone_loc": 8,
-                    "cog_erosion": 0.0,
-                    "erosion": 0.0,
-                    "files_scanned": 1,
-                    "high_cc_functions": 0,
-                    "high_cc_mass": 0.0,
-                    "high_cog_functions": 0,
-                    "high_cog_mass": 0.0,
-                    "structural_rule_findings": 0,
-                    "structural_rule_loc": 0,
-                    "syntax_by_language": {
-                        "python": {"node_count": 57, "tree_count": 1},
-                    },
-                    "syntax_node_count": 57,
-                    "syntax_tree_count": 1,
-                    "total_cog_mass": 0.0,
-                    "total_functions": 2,
-                    "total_loc": 8,
-                    "total_mass": 4.0,
-                    "verbosity": 1.0,
-                    "verbosity_flagged_loc": 8,
-                }),
-            },
-            CutoverJsonCase {
-                name: "python_low_use",
-                disable_sg: true,
-                has_findings: true,
-                expected: json!({
-                    "ast_grep_flagged_loc": 0,
-                    "clone_loc": 0,
-                    "cog_erosion": 0.0,
-                    "erosion": 0.0,
-                    "files_scanned": 1,
-                    "high_cc_functions": 0,
-                    "high_cc_mass": 0.0,
-                    "high_cog_functions": 0,
-                    "high_cog_mass": 0.0,
-                    "structural_rule_findings": 2,
-                    "structural_rule_loc": 5,
-                    "syntax_by_language": {
-                        "python": {"node_count": 42, "tree_count": 1},
-                    },
-                    "syntax_node_count": 42,
-                    "syntax_tree_count": 1,
-                    "total_cog_mass": 0.0,
-                    "total_functions": 2,
-                    "total_loc": 5,
-                    "total_mass": 3.146264369941973,
-                    "verbosity": 1.0,
-                    "verbosity_flagged_loc": 5,
-                }),
-            },
-            CutoverJsonCase {
-                name: "rust_clone",
-                disable_sg: true,
-                has_findings: true,
-                expected: json!({
-                    "ast_grep_flagged_loc": 0,
-                    "clone_loc": 8,
-                    "cog_erosion": 0.0,
-                    "erosion": 0.0,
-                    "files_scanned": 1,
-                    "high_cc_functions": 0,
-                    "high_cc_mass": 0.0,
-                    "high_cog_functions": 0,
-                    "high_cog_mass": 0.0,
-                    "structural_rule_findings": 0,
-                    "structural_rule_loc": 0,
-                    "syntax_by_language": {
-                        "rust": {"node_count": 69, "tree_count": 1},
-                    },
-                    "syntax_node_count": 69,
-                    "syntax_tree_count": 1,
-                    "total_cog_mass": 0.0,
-                    "total_functions": 2,
-                    "total_loc": 8,
-                    "total_mass": 4.0,
-                    "verbosity": 1.0,
-                    "verbosity_flagged_loc": 8,
-                }),
-            },
-            CutoverJsonCase {
-                name: "python_astgrep",
-                disable_sg: false,
-                has_findings: true,
-                expected: json!({
-                    "ast_grep_flagged_loc": 2,
-                    "clone_loc": 0,
-                    "cog_erosion": 0.0,
-                    "erosion": 0.0,
-                    "files_scanned": 1,
-                    "high_cc_functions": 0,
-                    "high_cc_mass": 0.0,
-                    "high_cog_functions": 0,
-                    "high_cog_mass": 0.0,
-                    "structural_rule_findings": 0,
-                    "structural_rule_loc": 0,
-                    "syntax_by_language": {
-                        "python": {"node_count": 38, "tree_count": 1},
-                    },
-                    "syntax_node_count": 38,
-                    "syntax_tree_count": 1,
-                    "total_cog_mass": 1.7320508075688772,
-                    "total_functions": 1,
-                    "total_loc": 3,
-                    "total_mass": 3.4641016151377544,
-                    "verbosity": 0.6666666666666666,
-                    "verbosity_flagged_loc": 2,
-                }),
-            },
+            scoreless_mixed_case(),
+            python_wrapper_case(),
+            python_clone_case(),
+            python_low_use_case(),
+            rust_clone_case(),
+            python_astgrep_case(),
         ]
+    }
+
+    fn scoreless_mixed_case() -> CutoverJsonCase {
+        CutoverJsonCase {
+            name: "scoreless_mixed",
+            disable_sg: true,
+            has_findings: false,
+            expected: json!({
+                "ast_grep_flagged_loc": 0,
+                "clone_loc": 0,
+                "cog_erosion": 0.0,
+                "erosion": 0.0,
+                "files_scanned": 2,
+                "high_cc_functions": 0,
+                "high_cc_mass": 0.0,
+                "high_cog_functions": 0,
+                "high_cog_mass": 0.0,
+                "structural_rule_findings": 0,
+                "structural_rule_loc": 0,
+                "syntax_by_language": {
+                    "python": {"node_count": 6, "tree_count": 1},
+                    "rust": {"node_count": 13, "tree_count": 1},
+                },
+                "syntax_node_count": 19,
+                "syntax_tree_count": 2,
+                "total_cog_mass": 0.0,
+                "total_functions": 1,
+                "total_loc": 3,
+                "total_mass": std::f64::consts::SQRT_2,
+                "verbosity": 0.0,
+                "verbosity_flagged_loc": 0,
+            }),
+        }
+    }
+
+    fn python_wrapper_case() -> CutoverJsonCase {
+        CutoverJsonCase {
+            name: "python_wrapper",
+            disable_sg: true,
+            has_findings: true,
+            expected: json!({
+                "ast_grep_flagged_loc": 0,
+                "clone_loc": 0,
+                "cog_erosion": 0.0,
+                "erosion": 0.0,
+                "files_scanned": 1,
+                "high_cc_functions": 0,
+                "high_cc_mass": 0.0,
+                "high_cog_functions": 0,
+                "high_cog_mass": 0.0,
+                "structural_rule_findings": 1,
+                "structural_rule_loc": 2,
+                "syntax_by_language": {"python": {"node_count": 13, "tree_count": 1}},
+                "syntax_node_count": 13,
+                "syntax_tree_count": 1,
+                "total_cog_mass": 0.0,
+                "total_functions": 1,
+                "total_loc": 2,
+                "total_mass": std::f64::consts::SQRT_2,
+                "verbosity": 1.0,
+                "verbosity_flagged_loc": 2,
+            }),
+        }
+    }
+
+    fn python_clone_case() -> CutoverJsonCase {
+        CutoverJsonCase {
+            name: "python_clone",
+            disable_sg: true,
+            has_findings: true,
+            expected: clone_case("python", 57),
+        }
+    }
+
+    fn rust_clone_case() -> CutoverJsonCase {
+        CutoverJsonCase {
+            name: "rust_clone",
+            disable_sg: true,
+            has_findings: true,
+            expected: clone_case("rust", 69),
+        }
+    }
+
+    fn clone_case(language: &str, node_count: usize) -> serde_json::Value {
+        json!({
+            "ast_grep_flagged_loc": 0,
+            "clone_loc": 8,
+            "cog_erosion": 0.0,
+            "erosion": 0.0,
+            "files_scanned": 1,
+            "high_cc_functions": 0,
+            "high_cc_mass": 0.0,
+            "high_cog_functions": 0,
+            "high_cog_mass": 0.0,
+            "structural_rule_findings": 0,
+            "structural_rule_loc": 0,
+            "syntax_by_language": {language: {"node_count": node_count, "tree_count": 1}},
+            "syntax_node_count": node_count,
+            "syntax_tree_count": 1,
+            "total_cog_mass": 0.0,
+            "total_functions": 2,
+            "total_loc": 8,
+            "total_mass": 4.0,
+            "verbosity": 1.0,
+            "verbosity_flagged_loc": 8,
+        })
+    }
+
+    fn python_low_use_case() -> CutoverJsonCase {
+        CutoverJsonCase {
+            name: "python_low_use",
+            disable_sg: true,
+            has_findings: true,
+            expected: json!({
+                "ast_grep_flagged_loc": 0,
+                "clone_loc": 0,
+                "cog_erosion": 0.0,
+                "erosion": 0.0,
+                "files_scanned": 1,
+                "high_cc_functions": 0,
+                "high_cc_mass": 0.0,
+                "high_cog_functions": 0,
+                "high_cog_mass": 0.0,
+                "structural_rule_findings": 2,
+                "structural_rule_loc": 5,
+                "syntax_by_language": {"python": {"node_count": 42, "tree_count": 1}},
+                "syntax_node_count": 42,
+                "syntax_tree_count": 1,
+                "total_cog_mass": 0.0,
+                "total_functions": 2,
+                "total_loc": 5,
+                "total_mass": 3.146_264_369_941_973,
+                "verbosity": 1.0,
+                "verbosity_flagged_loc": 5,
+            }),
+        }
+    }
+
+    fn python_astgrep_case() -> CutoverJsonCase {
+        CutoverJsonCase {
+            name: "python_astgrep",
+            disable_sg: false,
+            has_findings: true,
+            expected: json!({
+                "ast_grep_flagged_loc": 2,
+                "clone_loc": 0,
+                "cog_erosion": 0.0,
+                "erosion": 0.0,
+                "files_scanned": 1,
+                "high_cc_functions": 0,
+                "high_cc_mass": 0.0,
+                "high_cog_functions": 0,
+                "high_cog_mass": 0.0,
+                "structural_rule_findings": 0,
+                "structural_rule_loc": 0,
+                "syntax_by_language": {"python": {"node_count": 38, "tree_count": 1}},
+                "syntax_node_count": 38,
+                "syntax_tree_count": 1,
+                "total_cog_mass": 1.732_050_807_568_877_2,
+                "total_functions": 1,
+                "total_loc": 3,
+                "total_mass": 3.464_101_615_137_754_4,
+                "verbosity": 0.666_666_666_666_666_6,
+                "verbosity_flagged_loc": 2,
+            }),
+        }
     }
 }

@@ -4,7 +4,7 @@ use std::path::Path;
 use crate::languages::FunctionSpan;
 use crate::model::{BodyShape, CallSite, Function, Language};
 
-pub(crate) fn build_function(
+pub fn build_function(
     path: &Path,
     language: Language,
     span: &FunctionSpan,
@@ -31,7 +31,7 @@ pub(crate) fn build_function(
     }
 }
 
-pub(crate) fn function_lines<'a>(span: &FunctionSpan, all_lines: &'a [&'a str]) -> &'a [&'a str] {
+pub fn function_lines<'a>(span: &FunctionSpan, all_lines: &'a [&'a str]) -> &'a [&'a str] {
     if all_lines.is_empty() {
         return &[];
     }

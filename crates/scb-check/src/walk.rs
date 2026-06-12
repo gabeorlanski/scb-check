@@ -24,7 +24,7 @@ const DEFAULT_EXCLUDED_DIRS: &[&str] = &[
     "target",
 ];
 
-pub(crate) fn discover_sources(
+pub fn discover_sources(
     path: &Path,
     config: &Config,
     include_all: bool,
