@@ -225,8 +225,8 @@ fn parse_file(
     include_all: bool,
     valid_rule_ids: &BTreeSet<String>,
 ) -> Result<ParsedFile, String> {
-    let source =
-        read_source(&file.path).map_err(|error| format!("{}: {error}", file.path.display()))?;
+    let source = fs::read_to_string(&file.path)
+        .map_err(|error| format!("{}: {error}", file.path.display()))?;
     let lines: Vec<&str> = source.lines().collect();
     let syntax = parse_syntax(file.language, &source)
         .map_err(|error| format!("{}: {error}", file.path.display()))?;
@@ -333,10 +333,6 @@ fn apply_threshold_map(
                 .is_some_and(|count| count >= threshold)
         })
         .collect()
-}
-
-fn read_source(path: &Path) -> Result<String, std::io::Error> {
-    fs::read_to_string(path)
 }
 
 trait FindingRange {

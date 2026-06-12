@@ -9,7 +9,7 @@ This guide summarizes the current implementation status and the preferred approa
 - `scb-check check PATH` reports human-readable flags or JSON scores.
 - `scb-check rule RULE_ID` prints bundled `ast-grep` YAML or structural rule metadata.
 
-`src/scb_check/cli.py` is the public Python package shim that delegates to the Rust binary. The old Python implementation has been removed.
+The Python package is only a wheel delivery vehicle for `uvx`; wheels install the compiled Rust binary directly as the `scb-check` script. The old Python implementation and runtime shim have been removed.
 
 Implemented analysis paths:
 
@@ -93,17 +93,16 @@ Run the project workflow after changes:
 ```bash
 uv run ruff check --fix .
 uv run ty check .
-uv run pytest
-uv run scb-check check .
 uv run vulture
+cargo run -p scb-check -- check .
 ```
 
 For Rust cutover changes, also run:
 
 ```bash
 cargo fmt --check
-cargo test -p scb-check
-cargo clippy --all-targets -- -D warnings
+cargo test --all --all-features
+cargo clippy --all --all-targets --all-features -- -D warnings
 ```
 
 Use focused tests while iterating, then run the full workflow before presenting results. Keep tests behavioral: assert scores, exit codes, report fields, and rendering prefixes instead of internal call order.

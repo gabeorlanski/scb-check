@@ -186,7 +186,7 @@ fn clone_groups(clones: &[CloneBlock]) -> Vec<CloneGroup> {
             .is_some_and(|group| group.group_hash() == clone.group_hash)
         {
             if let Some(group) = groups.last_mut() {
-                group.push(clone);
+                group.rest.push(clone);
             }
         } else {
             groups.push(CloneGroup::new(clone));
@@ -221,10 +221,6 @@ impl CloneGroup {
 
     fn group_hash(&self) -> &str {
         &self.anchor.group_hash
-    }
-
-    fn push(&mut self, clone: CloneBlock) {
-        self.rest.push(clone);
     }
 
     fn iter(&self) -> impl Iterator<Item = &CloneBlock> {

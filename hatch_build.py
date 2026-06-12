@@ -36,8 +36,8 @@ class CustomBuildHook(BuildHookInterface):
             check=True,
         )
 
-        force_include = build_data.setdefault("force_include", {})
-        force_include[str(binary)] = f"src/scb_check/bin/{_binary_name()}"
+        shared_scripts = build_data.setdefault("shared_scripts", {})
+        shared_scripts[str(binary)] = _binary_name()
 
 
 def _binary_name() -> str:

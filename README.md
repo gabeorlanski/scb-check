@@ -1,6 +1,6 @@
 # scb-check
 
-Rust CLI that reports SCBench verbosity and erosion composites for supported source codebases. The Python package entrypoint is only a small shim that delegates to the packaged Rust binary.
+Rust CLI that reports SCBench verbosity and erosion composites for supported source codebases. Python packaging exists only to deliver the compiled Rust binary for `uvx`.
 
 - [Paper](https://arxiv.org/abs/2603.24755)
 - [Source](https://github.com/gabeorlanski/scb-check)
@@ -28,7 +28,7 @@ uv sync              # for development in this repo
 uv add scb-check     # as a dependency elsewhere
 ```
 
-Wheels include the compiled Rust binary under `scb_check/bin/`. In source checkouts, the Python package shim uses `SCB_CHECK_RUST_BIN` when set, then the packaged binary when present, then `target/debug/scb-check`, and otherwise falls back to `cargo run -q -p scb-check -- ...`.
+Wheels install the compiled Rust binary directly as the `scb-check` script, so `uvx scb-check` runs the Rust CLI without a Python runtime shim.
 
 Bundled ast-grep rules run in process through Rust ast-grep crates. No external `sg` executable is required for the Rust cutover path.
 
@@ -173,10 +173,10 @@ Rules:
 ## Development
 
 ```bash
-uv run pytest
-uv run ruff check
-uv run ty check src/
+uv run ruff check hatch_build.py
+uv run ty check hatch_build.py
 cargo fmt --check
-cargo test -p scb-check
-cargo clippy --all-targets -- -D warnings
+cargo test --all --all-features
+cargo clippy --all --all-targets --all-features -- -D warnings
+cargo run -p scb-check -- check .
 ```

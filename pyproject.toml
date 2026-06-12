@@ -15,31 +15,19 @@ dependencies = []
 Repository = "https://github.com/gabeorlanski/scb-check"
 Issues = "https://github.com/gabeorlanski/scb-check/issues"
 
-[project.scripts]
-scb-check = "scb_check.cli:main"
-
 [dependency-groups]
 dev = [
     "hatchling==1.27.0",
     "pre-commit==4.6.0",
-    "pytest==9.0.3",
-    "pytest-snapshot==0.9.0",
     "ruff==0.15.11",
     "ty==0.0.32",
     "vulture==2.16",
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/scb_check"]
+only-include = ["README.md"]
 
 [tool.hatch.build.hooks.custom]
-
-[tool.pytest.ini_options]
-pythonpath = ["src"]
-addopts = "-q"
-markers = [
-    "integration: integration tests that require external tools",
-]
 
 [tool.ty.src]
 exclude = ["tests/fixtures/"]
@@ -88,7 +76,7 @@ ignore = [
 convention = "google"  # Options: "google", "numpy", or "pep257"
 
 [tool.vulture]
-paths = ["src/scb_check"]
+paths = ["hatch_build.py"]
 min_confidence = 80
 exclude = [
     ".venv",

@@ -2,12 +2,21 @@ use std::collections::BTreeSet;
 
 use tree_sitter::Node;
 
-use crate::languages::{BaseParser, CommentSpan, FunctionSpan, LanguageParser};
+use crate::languages::{
+    BaseParser, CommentSpan, FunctionSpan, LanguageParser, push_children_reverse,
+};
 
 pub static PYTHON_PARSER: PythonLanguageParser = PythonLanguageParser;
 
 #[derive(Debug, Clone, Copy)]
 pub struct PythonLanguageParser;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SlocVisit {
+    Record(usize),
+    Descend,
+    Skip,
+}
 
 impl LanguageParser for PythonLanguageParser {
     fn label(&self) -> &'static str {
@@ -64,33 +73,32 @@ impl PythonLanguageParser {
     fn collect_python_sloc_token_lines(source: &str, node: Node<'_>, lines: &mut BTreeSet<usize>) {
         let mut stack = vec![node];
         while let Some(current) = stack.pop() {
-            if current.kind() == "comment" {
-                continue;
-            }
-            if BaseParser::is_string_node(current.kind()) {
-                lines.insert(current.start_position().row + 1);
-                continue;
-            }
-            if current.child_count() == 0 {
-                if !current
-                    .utf8_text(source.as_bytes())
-                    .unwrap_or_default()
-                    .trim()
-                    .is_empty()
-                {
-                    lines.insert(current.start_position().row + 1);
+            match Self::classify_sloc_visit(source, current) {
+                SlocVisit::Record(line) => {
+                    lines.insert(line);
                 }
-                continue;
+                SlocVisit::Descend => push_children_reverse(current, &mut stack),
+                SlocVisit::Skip => {}
             }
+        }
+    }
 
-            for index in (0..current.child_count()).rev() {
-                let Ok(index) = u32::try_from(index) else {
-                    continue;
-                };
-                if let Some(child) = current.child(index) {
-                    stack.push(child);
-                }
-            }
+    fn classify_sloc_visit(source: &str, node: Node<'_>) -> SlocVisit {
+        if node.kind() == "comment" {
+            return SlocVisit::Skip;
+        }
+        if BaseParser::is_string_node(node.kind()) {
+            return SlocVisit::Record(node.start_position().row + 1);
+        }
+        if node.child_count() != 0 {
+            return SlocVisit::Descend;
+        }
+
+        let text = node.utf8_text(source.as_bytes()).unwrap_or_default().trim();
+        if text.is_empty() {
+            SlocVisit::Skip
+        } else {
+            SlocVisit::Record(node.start_position().row + 1)
         }
     }
 

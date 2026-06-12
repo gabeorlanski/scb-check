@@ -31,7 +31,7 @@ That union is intersected with `SLOC`, then divided by total `SLOC`. A line flag
 ## Pipeline
 
 ```text
-CLI (`crates/scb-check`, via `src/scb_check/cli.py` package shim)
+CLI (`crates/scb-check`, packaged into Python wheels as a direct script for `uvx`)
     │
     ├─ load config and discover supported source files
     │
@@ -52,7 +52,7 @@ CLI (`crates/scb-check`, via `src/scb_check/cli.py` package shim)
 
 ## Layers
 
-- Boundary: the Rust crate parses public CLI arguments, loads configuration, walks paths, and renders output. `src/scb_check/cli.py` is only the Python package console-script shim that delegates to the packaged Rust binary.
+- Boundary: the Rust crate parses public CLI arguments, loads configuration, walks paths, and renders output. Python packaging is only used to deliver the compiled Rust binary for `uvx`.
 - Parsing and facts: `crates/scb-check/src/languages/`, `facts.rs`, `directives.rs`, and `analyze.rs` parse already-read Python/Rust source, compute `SLOC`, parse Python source directives, and build shared facts.
 - Analysis integrations: `clones.rs` owns normalized clone hashing, and `astgrep.rs` owns in-process ast-grep matching for bundled and extra Python YAML rules.
 - Rules: `rules/` owns structural rule metadata, registration, and Rust-coded rule implementations.
