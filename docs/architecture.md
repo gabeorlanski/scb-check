@@ -77,7 +77,10 @@ CLI (`crates/scb-check`, via `src/scb_check/cli.py` package shim)
 : Duplicate syntax block found by hashing normalized tree-sitter subtrees. Candidates must contain at least two executable body statements in one duplicated body; signatures, comments, blanks, and Python docstrings do not satisfy that threshold.
 
 `structural rule`
-: Rust-coded rule that checks shared Python/Rust facts and returns a structural finding.
+: Rust-coded `Rule` implementation that checks shared Python/Rust facts and returns structural findings.
+
+`violation`
+: Per-rule diagnostic type that owns the user-facing message and optional fix title metadata, following the same separation Ruff uses between rule checks and diagnostics.
 
 `RuleFinding`
 : Fixed-field structural finding with rule ID, severity, message, span, and subject metadata.
@@ -107,5 +110,5 @@ Change these only with tests and documentation updates because they move user-vi
 ## Extension points
 
 - Extra `ast-grep` rules: set `SCB_CHECK_EXTRA_SLOP_RULES` to a `:`-separated list of YAML files.
-- Structural rules: add a Rust rule file in `rules/`, register it in the structural registry, and keep it on shared facts.
+- Structural rules: add a Rust rule file in `rules/`, implement `Rule` plus a per-rule `Violation`, register it in the structural registry, and keep it on shared facts.
 - New public CLI commands: add them to `crates/scb-check`; do not add command logic to the Python shim.

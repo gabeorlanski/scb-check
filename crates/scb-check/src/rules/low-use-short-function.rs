@@ -1,26 +1,66 @@
 use crate::config::LowUseShortFunctionSettings;
 use crate::model::{CallSite, Function, StructuralFinding};
-use crate::rules::base::StructuralRuleMetadata;
-
-pub(crate) const METADATA: StructuralRuleMetadata = StructuralRuleMetadata {
-    id: "low-use-short-function",
-    severity: "info",
-    target: "symbol",
-    message: "Short low-use function can be inlined safely.",
+use crate::rules::base::{
+    Rule, RuleContext, SometimesFixableViolation, StructuralRuleMetadata, Violation, finding,
+    sometimes_fix_title,
 };
 
-pub(crate) fn check(
-    functions: &[Function],
-    settings: &LowUseShortFunctionSettings,
-) -> Vec<StructuralFinding> {
-    if !settings.enabled {
-        return Vec::new();
+pub(crate) static RULE: LowUseShortFunctionRule = LowUseShortFunctionRule;
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LowUseShortFunctionRule;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LowUseShortFunction {
+    function_name: String,
+    call_sites: usize,
+}
+
+impl Rule for LowUseShortFunctionRule {
+    fn metadata(&self) -> StructuralRuleMetadata {
+        LowUseShortFunction::METADATA
     }
 
-    functions
-        .iter()
-        .filter_map(|function| low_use_short_function(function, functions, settings))
-        .collect()
+    fn check(&self, context: &RuleContext<'_>) -> Vec<StructuralFinding> {
+        if !context.low_use_short_function.enabled {
+            return Vec::new();
+        }
+
+        context
+            .functions
+            .iter()
+            .filter_map(|function| {
+                low_use_short_function(function, context.functions, context.low_use_short_function)
+            })
+            .collect()
+    }
+}
+
+impl Violation for LowUseShortFunction {
+    const METADATA: StructuralRuleMetadata = StructuralRuleMetadata {
+        id: "low-use-short-function",
+        severity: "info",
+        target: "symbol",
+        message: "Short low-use function can be inlined safely.",
+    };
+
+    fn message(&self) -> String {
+        let noun = if self.call_sites == 1 {
+            "call site"
+        } else {
+            "call sites"
+        };
+        format!(
+            "`{}` is short and used at {} {noun}; inline it",
+            self.function_name, self.call_sites
+        )
+    }
+}
+
+impl SometimesFixableViolation for LowUseShortFunction {
+    fn fix_title(&self) -> Option<String> {
+        Some(format!("Inline `{}`", self.function_name))
+    }
 }
 
 fn low_use_short_function(
@@ -40,15 +80,18 @@ fn low_use_short_function(
         return None;
     }
 
-    Some(StructuralFinding {
-        rule_id: METADATA.id,
-        severity: METADATA.severity,
-        message: low_use_message(&function.name, call_sites.len()),
-        file: function.file.clone(),
-        start_line: function.start_line,
-        end_line: function.end_line,
-        subject_name: function.name.clone(),
-    })
+    let violation = LowUseShortFunction {
+        function_name: function.name.clone(),
+        call_sites: call_sites.len(),
+    };
+    Some(finding(
+        &violation,
+        function.file.clone(),
+        function.start_line,
+        function.end_line,
+        function.name.clone(),
+        sometimes_fix_title(&violation),
+    ))
 }
 
 fn call_sites_for<'a>(
@@ -94,13 +137,4 @@ const fn inline_sloc_delta(function: &Function) -> usize {
 
 const fn inline_cyclomatic_delta(function: &Function) -> usize {
     function.cyclomatic.saturating_sub(1)
-}
-
-fn low_use_message(name: &str, call_sites: usize) -> String {
-    let noun = if call_sites == 1 {
-        "call site"
-    } else {
-        "call sites"
-    };
-    format!("`{name}` is short and used at {call_sites} {noun}; inline it")
 }

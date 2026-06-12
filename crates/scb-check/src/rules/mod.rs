@@ -7,33 +7,37 @@ mod trivial_wrapper;
 
 use crate::config::LowUseShortFunctionSettings;
 use crate::model::{Function, StructuralFinding};
-use crate::rules::base::StructuralRuleMetadata;
+use crate::rules::base::{Rule, RuleContext};
 
-const STRUCTURAL_RULES: &[StructuralRuleMetadata] =
-    &[trivial_wrapper::METADATA, low_use_short_function::METADATA];
+fn structural_rules() -> [&'static dyn Rule; 2] {
+    [&trivial_wrapper::RULE, &low_use_short_function::RULE]
+}
 
 pub(crate) fn structural_rule_ids() -> Vec<&'static str> {
-    STRUCTURAL_RULES
+    structural_rules()
         .iter()
-        .map(|metadata| metadata.id)
+        .map(|rule| rule.metadata().id)
         .collect()
 }
 
 pub(crate) fn structural_rule_document(rule_id: &str) -> Option<String> {
-    let metadata = STRUCTURAL_RULES
-        .iter()
-        .find(|metadata| metadata.id == rule_id)?;
-    Some(base::structural_rule_document(*metadata))
+    let rules = structural_rules();
+    let rule = rules
+        .into_iter()
+        .find(|rule| rule.metadata().id == rule_id)?;
+    Some(base::structural_rule_document(rule.metadata()))
 }
 
 pub(crate) fn run_structural_rules(
     functions: &[Function],
     low_use_short_function: &LowUseShortFunctionSettings,
 ) -> Vec<StructuralFinding> {
-    let mut findings = trivial_wrapper::check(functions);
-    findings.extend(low_use_short_function::check(
+    let context = RuleContext {
         functions,
         low_use_short_function,
-    ));
-    findings
+    };
+    structural_rules()
+        .iter()
+        .flat_map(|rule| rule.check(&context))
+        .collect()
 }

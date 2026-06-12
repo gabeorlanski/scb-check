@@ -103,6 +103,7 @@ pub(crate) struct StructuralFinding {
     pub rule_id: &'static str,
     pub severity: &'static str,
     pub message: String,
+    pub fix_title: Option<String>,
     pub file: PathBuf,
     pub start_line: usize,
     pub end_line: usize,
