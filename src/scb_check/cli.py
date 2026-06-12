@@ -1,38 +1,49 @@
-"""Top-level Typer application wiring for `scb-check`."""
+"""Rust entrypoint shim for `scb-check` during the cutover."""
 
 from __future__ import annotations
 
-from importlib import metadata
-from typing import Annotated
-
-import typer
-
-from scb_check.commands.check import CHECK_COMMAND_CLASS
-from scb_check.commands.check import check
-from scb_check.commands.rule import rule
-
-main = typer.Typer(add_completion=False)
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 
-@main.callback(invoke_without_command=True)
-def callback(
-    *,
-    version: Annotated[
-        bool | None,
-        typer.Option(
-            "--version",
-            is_eager=True,
-            help="Show version and exit.",
-        ),
-    ] = None,
-) -> None:
-    """scb-check CLI."""
-    if not version:
-        return
-
-    typer.echo(metadata.version("scb-check"))
-    raise typer.Exit
+def main() -> None:
+    """Run the Rust `scb-check` binary."""
+    package_binary = _package_binary()
+    repo_root = _repo_root()
+    command = _rust_command(package_binary, repo_root, sys.argv[1:])
+    completed = subprocess.run(command, cwd=repo_root, check=False)  # noqa: S603
+    raise SystemExit(completed.returncode)
 
 
-main.command("check", cls=CHECK_COMMAND_CLASS)(check)
-main.command("rule")(rule)
+def _package_binary() -> Path:
+    suffix = ".exe" if os.name == "nt" else ""
+    return Path(__file__).resolve().parent / "bin" / f"scb-check{suffix}"
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def _rust_command(package_binary: Path, repo_root: Path, args: list[str]) -> list[str]:
+    override = os.environ.get("SCB_CHECK_RUST_BIN")
+    if override:
+        return [override, *args]
+
+    if package_binary.is_file():
+        return [str(package_binary), *args]
+
+    binary = repo_root / "target" / "debug" / "scb-check"
+    if binary.is_file():
+        return [str(binary), *args]
+
+    if (repo_root / "Cargo.toml").is_file():
+        return ["cargo", "run", "-q", "-p", "scb-check", "--", *args]
+
+    message = (
+        "scb-check Rust binary is not available; set `SCB_CHECK_RUST_BIN` "
+        "to the packaged binary path"
+    )
+    sys.stderr.write(f"{message}\n")
+    raise SystemExit(2)

@@ -1,0 +1,417 @@
+use std::path::Path;
+
+use crate::model::{AstGrepFinding, CloneBlock, Function, Report, StructuralFinding};
+use ariadne::Source as AriadneSource;
+use serde_json::json;
+
+pub(crate) fn render_json(report: &Report) -> String {
+    json!({
+        "verbosity": json_number(report.verbosity()),
+        "erosion": json_number(report.erosion()),
+        "cog_erosion": json_number(report.cog_erosion()),
+        "files_scanned": report.files_scanned,
+        "total_loc": report.total_loc,
+        "verbosity_flagged_loc": report.verbosity_flagged_loc,
+        "clone_loc": report.clone_loc,
+        "ast_grep_flagged_loc": report.ast_grep_flagged_loc,
+        "structural_rule_loc": report.structural_rule_loc,
+        "structural_rule_findings": report.structural_rule_findings,
+        "total_functions": report.total_functions,
+        "high_cc_functions": report.high_cc_functions,
+        "high_cog_functions": report.high_cog_functions,
+        "total_mass": json_number(report.total_mass),
+        "high_cc_mass": json_number(report.high_cc_mass),
+        "total_cog_mass": json_number(report.total_cog_mass),
+        "high_cog_mass": json_number(report.high_cog_mass),
+        "syntax_tree_count": report.syntax_tree_count(),
+        "syntax_node_count": report.syntax_node_count(),
+        "syntax_by_language": syntax_by_language(report),
+    })
+    .to_string()
+}
+
+fn json_number(value: f64) -> f64 {
+    if !value.is_finite() || value.abs() < f64::EPSILON {
+        0.0
+    } else {
+        value
+    }
+}
+
+pub(crate) fn render_human(
+    report: &Report,
+    min_duplicate_lines: Option<usize>,
+    context_lines: usize,
+) -> String {
+    let mut entries = Vec::new();
+    append_clone_entries(&mut entries, report, min_duplicate_lines);
+    append_finding_entries(
+        &mut entries,
+        &report.ast_grep_findings,
+        report,
+        context_lines,
+        finding_location,
+        render_ast_grep,
+        1,
+    );
+    append_finding_entries(
+        &mut entries,
+        &report.structural_findings,
+        report,
+        context_lines,
+        finding_location,
+        render_structural,
+        2,
+    );
+    append_complexity_entries(&mut entries, report, context_lines);
+    entries.sort_by(|left, right| left.key.cmp(&right.key));
+    entries
+        .into_iter()
+        .map(|entry| entry.text)
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+fn append_clone_entries(
+    entries: &mut Vec<RenderedEntry>,
+    report: &Report,
+    min_duplicate_lines: Option<usize>,
+) {
+    for group in clone_groups(&report.clones) {
+        let Some(anchor) = group.first() else {
+            continue;
+        };
+        let line_count = clone_line_count(anchor);
+        if min_duplicate_lines.is_some_and(|minimum| line_count < minimum) {
+            continue;
+        }
+        entries.push(RenderedEntry {
+            key: render_key(&anchor.file, anchor.start_line, 0),
+            text: render_clone_group(&group, line_count),
+        });
+    }
+}
+
+fn append_finding_entries<T>(
+    entries: &mut Vec<RenderedEntry>,
+    findings: &[T],
+    report: &Report,
+    context_lines: usize,
+    location: impl Fn(&T) -> (&Path, usize),
+    render: impl Fn(&T, &Report, usize) -> String,
+    kind_rank: u8,
+) {
+    for finding in findings {
+        let (file, line) = location(finding);
+        entries.push(RenderedEntry {
+            key: render_key(file, line, kind_rank),
+            text: render(finding, report, context_lines),
+        });
+    }
+}
+
+trait FindingLocation {
+    fn file(&self) -> &Path;
+    fn start_line(&self) -> usize;
+}
+
+impl FindingLocation for AstGrepFinding {
+    fn file(&self) -> &Path {
+        &self.file
+    }
+
+    fn start_line(&self) -> usize {
+        self.start_line
+    }
+}
+
+impl FindingLocation for StructuralFinding {
+    fn file(&self) -> &Path {
+        &self.file
+    }
+
+    fn start_line(&self) -> usize {
+        self.start_line
+    }
+}
+
+fn finding_location<T: FindingLocation>(finding: &T) -> (&Path, usize) {
+    (finding.file(), finding.start_line())
+}
+
+fn append_complexity_entries(
+    entries: &mut Vec<RenderedEntry>,
+    report: &Report,
+    context_lines: usize,
+) {
+    for function in report
+        .functions
+        .iter()
+        .filter(|function| function.is_high_cc())
+    {
+        entries.push(RenderedEntry {
+            key: render_key(&function.file, function.start_line, 3),
+            text: render_complexity(function, report, context_lines, false),
+        });
+    }
+    for function in report
+        .functions
+        .iter()
+        .filter(|function| function.is_high_cog())
+    {
+        entries.push(RenderedEntry {
+            key: render_key(&function.file, function.start_line, 4),
+            text: render_complexity(function, report, context_lines, true),
+        });
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct RenderKey {
+    path: String,
+    line: usize,
+    kind_rank: u8,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RenderedEntry {
+    key: RenderKey,
+    text: String,
+}
+
+fn render_key(file: &Path, line: usize, kind_rank: u8) -> RenderKey {
+    RenderKey {
+        path: display_path(file),
+        line,
+        kind_rank,
+    }
+}
+
+fn syntax_by_language(report: &Report) -> serde_json::Value {
+    let entries = report.syntax_by_language.iter().map(|summary| {
+        (
+            summary.language.as_str().to_string(),
+            json!({
+                "tree_count": summary.tree_count,
+                "node_count": summary.node_count,
+            }),
+        )
+    });
+    entries.collect::<serde_json::Map<_, _>>().into()
+}
+
+fn clone_groups(clones: &[CloneBlock]) -> Vec<Vec<CloneBlock>> {
+    let mut clones = clones.to_vec();
+    clones.sort_by(|left, right| {
+        (
+            left.group_hash.as_str(),
+            left.file.as_os_str(),
+            left.start_line,
+        )
+            .cmp(&(
+                right.group_hash.as_str(),
+                right.file.as_os_str(),
+                right.start_line,
+            ))
+    });
+
+    let mut groups: Vec<Vec<CloneBlock>> = Vec::new();
+    for clone in clones {
+        if groups
+            .last()
+            .and_then(|group| group.first())
+            .is_some_and(|first| first.group_hash == clone.group_hash)
+        {
+            groups
+                .last_mut()
+                .expect("last group exists after checking last")
+                .push(clone);
+        } else {
+            groups.push(vec![clone]);
+        }
+    }
+    groups.sort_by(|left, right| {
+        let left_anchor = left.first().expect("clone group should not be empty");
+        let right_anchor = right.first().expect("clone group should not be empty");
+        (left_anchor.file.as_os_str(), left_anchor.start_line)
+            .cmp(&(right_anchor.file.as_os_str(), right_anchor.start_line))
+    });
+    groups
+}
+
+fn render_clone_group(group: &[CloneBlock], line_count: usize) -> String {
+    let anchor = group.first().expect("clone group should not be empty");
+    let line_number_width = group
+        .iter()
+        .map(|clone| clone.end_line.to_string().len())
+        .max()
+        .unwrap_or(1);
+    let pad = " ".repeat(line_number_width);
+    let mut lines = vec![format!(
+        "duplicate-structure: duplicated block ({} lines, {} instances)",
+        line_count, anchor.instance_count
+    )];
+    for (index, clone) in group.iter().enumerate() {
+        if index > 0 {
+            lines.push(format!("{pad} ┆"));
+        }
+        lines.push(format!(
+            "{pad} ┌─ {}:{}",
+            display_path(&clone.file),
+            clone.start_line
+        ));
+        lines.push(format!("{pad} │"));
+        for (offset, text) in clone.first_lines.iter().enumerate() {
+            lines.push(format!(
+                "{:>line_number_width$} │ {}",
+                clone.start_line + offset,
+                text
+            ));
+        }
+        lines.push(format!("{pad} │"));
+    }
+    lines.join("\n")
+}
+
+const fn clone_line_count(clone: &CloneBlock) -> usize {
+    clone.end_line.saturating_sub(clone.start_line) + 1
+}
+
+fn render_ast_grep(finding: &AstGrepFinding, report: &Report, context_lines: usize) -> String {
+    let message = if finding.message.trim().is_empty() {
+        "matches slop pattern"
+    } else {
+        finding.message.trim()
+    };
+    let mut lines = vec![format!(
+        "{}[{}]: {}\n  --> {}:{}:{}",
+        finding.severity,
+        finding.rule_id,
+        message,
+        display_path(&finding.file),
+        finding.start_line,
+        finding.start_col + 1
+    )];
+    lines.extend(source_block(
+        report,
+        &finding.file,
+        finding.start_line,
+        finding.end_line,
+        context_lines,
+    ));
+    lines.join("\n")
+}
+
+fn render_structural(finding: &StructuralFinding, report: &Report, context_lines: usize) -> String {
+    let mut lines = vec![format!(
+        "{}[{}]: {}\n  --> {}:{}",
+        finding.rule_id,
+        finding.severity,
+        finding.message,
+        display_path(&finding.file),
+        finding.start_line
+    )];
+    lines.extend(source_block(
+        report,
+        &finding.file,
+        finding.start_line,
+        finding.end_line,
+        context_lines,
+    ));
+    lines.join("\n")
+}
+
+fn render_complexity(
+    function: &Function,
+    report: &Report,
+    context_lines: usize,
+    cognitive: bool,
+) -> String {
+    let mut lines = if cognitive {
+        vec![format!(
+            "cog_erosion: function `{}` exceeds cognitive complexity threshold\n  --> {}:{}",
+            function.name,
+            display_path(&function.file),
+            function.start_line,
+        )]
+    } else {
+        vec![format!(
+            "erosion: function `{}` exceeds complexity threshold\n  --> {}:{}",
+            function.name,
+            display_path(&function.file),
+            function.start_line,
+        )]
+    };
+    lines.extend(source_block(
+        report,
+        &function.file,
+        function.start_line,
+        function.start_line,
+        context_lines,
+    ));
+    if cognitive {
+        lines.push(format!(
+            "  = cognitive complexity: {}, sloc: {} (threshold: cognitive complexity > 10)",
+            function.cognitive, function.sloc
+        ));
+    } else {
+        lines.push(format!(
+            "  = complexity: {}, sloc: {} (threshold: complexity > 10)",
+            function.cyclomatic, function.sloc
+        ));
+    }
+    lines.join("\n")
+}
+
+fn source_block(
+    report: &Report,
+    file: &Path,
+    start_line: usize,
+    end_line: usize,
+    context_lines: usize,
+) -> Vec<String> {
+    let Some(source_lines) = report
+        .source_lines
+        .iter()
+        .find(|source| source.file.as_path() == file)
+    else {
+        return Vec::new();
+    };
+    if source_lines.lines.is_empty() {
+        return Vec::new();
+    }
+    let source = ariadne_source(&source_lines.lines);
+    let first_line = start_line.saturating_sub(context_lines).max(1);
+    let last_line = end_line
+        .max(start_line)
+        .saturating_add(context_lines)
+        .min(source_lines.lines.len());
+    let width = last_line.to_string().len();
+    let mut rendered = Vec::new();
+    for line_number in first_line..=last_line {
+        let text = ariadne_line_text(&source, line_number);
+        rendered.push(format!("{line_number:>width$} | {text}"));
+    }
+    rendered
+}
+
+fn ariadne_source(lines: &[String]) -> AriadneSource<String> {
+    AriadneSource::from(lines.join("\n"))
+}
+
+fn ariadne_line_text(source: &AriadneSource<String>, line_number: usize) -> &str {
+    let Some(line) = source.line(line_number.saturating_sub(1)) else {
+        return "";
+    };
+    source.get_line_text(line).unwrap_or("").trim_end()
+}
+
+fn display_path(path: &Path) -> String {
+    let Ok(cwd) = std::env::current_dir() else {
+        return path.display().to_string();
+    };
+    path.strip_prefix(cwd)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .to_string()
+}

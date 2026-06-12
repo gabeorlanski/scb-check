@@ -9,21 +9,7 @@ description = "CLI for measuring verbosity and erosion metrics in supported sour
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
-dependencies = [
-    "ast-grep-cli==0.42.1",
-    "typer==0.24.2",
-    "structlog==25.5.0",
-    "tree-sitter==0.25.2",
-    "tree-sitter-python==0.25.0",
-    "pyyaml==6.0.3",
-    "pydantic==2.13.3",
-    "tree-sitter-rust==0.24.2",
-    "tree-sitter-javascript==0.25.0",
-    "tree-sitter-typescript==0.23.2",
-    "tree-sitter-zig==1.1.2",
-    "tree-sitter-haskell==0.23.1",
-    "tree-sitter-cpp==0.23.4",
-]
+dependencies = []
 
 [project.urls]
 Repository = "https://github.com/gabeorlanski/scb-check"
@@ -45,6 +31,8 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/scb_check"]
+
+[tool.hatch.build.hooks.custom]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
