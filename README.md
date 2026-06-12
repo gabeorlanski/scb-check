@@ -1,12 +1,12 @@
 # scb-check
 
-Python CLI that reports SCBench verbosity and erosion composites for supported source codebases.
+Rust CLI that reports SCBench verbosity and erosion composites for supported source codebases. The Python package entrypoint is only a small shim that delegates to the packaged Rust binary.
 
 - [Paper](https://arxiv.org/abs/2603.24755)
 - [Source](https://github.com/gabeorlanski/scb-check)
 - [SlopCodeBench (main repo)](https://github.com/SprocketLab/slop-code-bench)
 
-- **Verbosity**: fraction of SLOC flagged by clone detection, ast-grep slop rules, or structural rules. Non-Python languages currently contribute clone lines only.
+- **Verbosity**: fraction of SLOC flagged by clone detection, ast-grep slop rules, or structural rules.
 - **Erosion**: share of function "mass" (`complexity * sqrt(sloc)`) concentrated in high-complexity functions (cyclomatic complexity > 10).
 - **Cognitive erosion**: same mass-share calculation using cognitive complexity > 10.
 
@@ -28,21 +28,9 @@ uv sync              # for development in this repo
 uv add scb-check     # as a dependency elsewhere
 ```
 
-For hash-checked dependency installs from this repository, use the exported lock files:
+Wheels include the compiled Rust binary under `scb_check/bin/`. In source checkouts, the Python package shim uses `SCB_CHECK_RUST_BIN` when set, then the packaged binary when present, then `target/debug/scb-check`, and otherwise falls back to `cargo run -q -p scb-check -- ...`.
 
-```bash
-python -m pip install --require-hashes -r requirements.lock
-python -m pip install --require-hashes -r requirements-dev.lock
-```
-
-Regenerate them after dependency changes with:
-
-```bash
-uv export --format requirements.txt --no-dev --no-emit-project --frozen --output-file requirements.lock
-uv export --format requirements.txt --all-groups --no-emit-project --frozen --output-file requirements-dev.lock
-```
-
-`scb-check` runs bundled ast-grep rules by trying a global `sg` executable first. If global `sg` is missing or fails, it falls back to the `ast-grep-cli` executable installed with `scb-check`.
+Bundled ast-grep rules run in process through Rust ast-grep crates. No external `sg` executable is required for the Rust cutover path.
 
 ## Usage
 
@@ -54,12 +42,12 @@ scb-check check PATH -v / --verbosity   # add info logging
 scb-check check PATH -vv                # add debug logging
 scb-check check PATH --config FILE      # explicit config path
 scb-check check PATH --include-all      # include gitignored files plus ignored, lower-severity, and boundary-suppressed findings
-scb-check check PATH --disable-sg  # skip ast-grep subprocess findings
+scb-check check PATH --disable-sg  # skip ast-grep findings
 scb-check check PATH --min-duplicate-lines N  # show duplicate groups with at least N SLOC lines
 scb-check rule RULE_ID                  # print YAML or metadata for a specific rule
 ```
 
-`PATH` may be a file or directory. Directories are walked for supported source files: Python (`.py`, `.pyw`), Rust (`.rs`), JavaScript (`.js`, `.mjs`, `.cjs`), TypeScript (`.ts`), Zig (`.zig`), Haskell (`.hs`), and C++ (`.cpp`, `.cc`, `.cxx`, `.c++`, `.hpp`, `.hh`, `.hxx`). Directory discovery respects `.gitignore` globs by default; use `--include-all` to scan gitignored supported files too.
+`PATH` may be a file or directory. The first Rust cutover scans Python (`.py`, `.pyw`) and Rust (`.rs`) source files. Directory discovery respects `.gitignore` globs by default; use `--include-all` to scan gitignored supported files too.
 
 ### JSON report fields
 
@@ -108,7 +96,7 @@ enabled = true
 
 Configured `exclude` patterns still apply when `--include-all` is used; only `.gitignore` file discovery is extended.
 
-Ast-grep slop rules, structural rules, and source directives are currently Python-only. Rust, JavaScript, TypeScript, Zig, Haskell, and C++ still participate in SLOC totals, clone detection, cyclomatic erosion, and cognitive erosion.
+Ast-grep slop rules and source directives are currently Python-only. Rust participates in SLOC totals, clone detection, structural rules where shared facts are available, cyclomatic erosion, and cognitive erosion. JavaScript, TypeScript, Go, Zig, Haskell, and C++ are outside the first Rust cutover scan target set.
 
 When using `pyproject.toml`, scb-check also includes excludes from:
 
@@ -169,12 +157,12 @@ Rules:
 
 ## How it works
 
-- **Tree walking**: language dispatch backed by tree-sitter grammars emits language-agnostic `ModuleIR` and semantic project context.
-- **Clone detection**: hashed AST blocks across the scanned set; two or more matching instances become a `CloneBlock`.
-- **Slop patterns**: Python ast-grep rules in `src/scb_check/resources/slop_rules/` split by category (e.g. `range(len(x))`, `dict.get(k, None)`, `isinstance` ladders, manual min/max, defensive guards).
-- **Structural rules**: typed Python classes in `src/scb_check/rules/` run over tree-walking IR. `trivial-wrapper` flags removable single-return pass-through functions (identity returns and calls that only forward parameters to another scanned function), while semantic keep reasons skip constant returns, default-backed value providers, external calls, decorated functions, dunder methods, and inherited API implementations. `low-use-short-function` flags short helpers with few resolved call sites only when inlining them would stay within configured caller SLOC, complexity, cognitive complexity, and nesting budgets.
+- **Tree walking**: Rust tree-sitter parsing emits shared Python/Rust facts for SLOC, functions, comments, complexity, call sites, and clone fingerprints.
+- **Clone detection**: hashed parser-derived function-body fingerprints across the scanned set; two or more matching instances become a `CloneBlock`.
+- **Slop patterns**: Python ast-grep rules in `crates/scb-check/resources/slop_rules/` split by category (e.g. `range(len(x))`, `dict.get(k, None)`, `isinstance` ladders, manual min/max, defensive guards).
+- **Structural rules**: Rust-coded structural rules run over shared Python/Rust facts. `trivial-wrapper` flags removable single-return pass-through functions, and `low-use-short-function` flags short helpers with few call sites only when inlining them stays within configured caller SLOC, complexity, cognitive complexity, and nesting budgets.
 - **Extra local slop patterns**: set `SCB_CHECK_EXTRA_SLOP_RULES` to a `:`-separated list of YAML paths to layer additional rules on top of the bundled set.
-- **Complexity**: per-function cyclomatic and cognitive complexity plus SLOC, combined into mass scores for erosion metrics.
+- **Complexity**: per-function cyclomatic and cognitive complexity plus SLOC, combined into mass scores for erosion metrics with stable sorted and compensated summation.
 
 ## Documentation
 
@@ -188,4 +176,7 @@ Rules:
 uv run pytest
 uv run ruff check
 uv run ty check src/
+cargo fmt --check
+cargo test -p scb-check
+cargo clippy --all-targets -- -D warnings
 ```
