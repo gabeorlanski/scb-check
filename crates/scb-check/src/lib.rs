@@ -6,7 +6,6 @@ mod astgrep;
 mod clones;
 mod config;
 mod directives;
-mod facts;
 mod languages;
 mod model;
 mod render;

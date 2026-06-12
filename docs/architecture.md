@@ -53,7 +53,7 @@ CLI (`crates/scb-check`, packaged into Python wheels as a direct script for `uvx
 ## Layers
 
 - Boundary: the Rust crate parses public CLI arguments, loads configuration, walks paths, and renders output. Python packaging is only used to deliver the compiled Rust binary for `uvx`.
-- Parsing and facts: `crates/scb-check/src/languages/`, `facts.rs`, `directives.rs`, and `analyze.rs` parse already-read Python/Rust source, compute `SLOC`, parse Python source directives, and build shared facts.
+- Parsing and facts: `crates/scb-check/src/languages/`, `directives.rs`, and `analyze.rs` parse already-read Python/Rust source, compute `SLOC`, parse source directives, and build shared facts.
 - Analysis integrations: `clones.rs` owns normalized clone hashing, and `astgrep.rs` owns in-process ast-grep matching for bundled and extra Python YAML rules.
 - Rules: `rules/` owns structural rule metadata, registration, and Rust-coded rule implementations.
 - Reporting: `render.rs` turns reports into JSON or human-readable flag text. JSON reports include score summaries plus syntax tree and node counts by parsed language.
@@ -65,10 +65,10 @@ CLI (`crates/scb-check`, packaged into Python wheels as a direct script for `uvx
 : Real source lines of code. Comments, blank lines, punctuation-only delimiter lines in generic parsers, and standalone non-byte, non-f-string Python string statements do not count.
 
 `source directive`
-: Python comment directive parsed from tree-sitter comment nodes, such as `# scbc ignore[...]` or `# scbc boundary`.
+: Language comment directive parsed from tree-sitter comment nodes, such as `# scbc ignore[...]`, `// scbc ignore[...]`, or `# scbc boundary`.
 
 `boundary suppression`
-: `# scbc boundary` inside a function body hides default `ast-grep` findings in that function. Use `--include-all` to show boundary-suppressed findings.
+: `scbc boundary` inside a function body hides default `ast-grep` findings in that function. Use `--include-all` to show boundary-suppressed findings.
 
 `ast-grep rule`
 : Python YAML-backed rule run by ast-grep crates. Extra local rules come from `SCB_CHECK_EXTRA_SLOP_RULES`.
@@ -89,7 +89,7 @@ CLI (`crates/scb-check`, packaged into Python wheels as a direct script for `uvx
 
 - Line numbers are 1-indexed after tree-sitter data leaves the parser layer.
 - Supported scan targets are Python (`.py`, `.pyw`) and Rust (`.rs`).
-- Python ast-grep rules and source directives are Python-only. Rust-coded structural rules run over any language adapter that provides the needed shared facts.
+- Python ast-grep rules are Python-only. Source directives use each language adapter's comment syntax.
 - Parser-native data may feed clone fingerprints and shared facts, but structural rules do not inspect tree-sitter nodes directly.
 - ast-grep runs in process through Rust ast-grep crates. Invalid bundled or extra rules are user-facing errors.
 - Source ignores and structural rules share one rule ID namespace, so `scbc ignore[...]` is never ambiguous.
@@ -100,9 +100,9 @@ CLI (`crates/scb-check`, packaged into Python wheels as a direct script for `uvx
 
 Change these only with tests and documentation updates because they move user-visible scores:
 
-- parser-derived `SLOC` exclusions in `languages/<language>/parser.rs`,
+- parser-derived `SLOC` exclusions in `languages/<language>/mod.rs`,
 - clone fingerprint normalization in `languages/mod.rs` and duplicate grouping in `clones.rs`,
-- cyclomatic and cognitive complexity node sets in `languages/<language>/parser.rs`,
+- cyclomatic and cognitive complexity node sets in `languages/<language>/mod.rs`,
 - sorted and compensated mass summation in `analyze.rs`,
 - structural rule span selection and filtering in `rules/`, `directives.rs`, and `analyze.rs`,
 - verbosity union logic in `analyze.rs`.

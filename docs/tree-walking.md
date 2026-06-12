@@ -1,6 +1,6 @@
 # Tree walking
 
-Tree walking turns already-read source into shared facts that scoring, clone detection, structural rules, directives, and reporting can reuse. Language-specific parsing lives in `crates/scb-check/src/languages/<language>/parser.rs`, the shared `BaseParser` and `LanguageParser` contract live in `languages/mod.rs`, directive filtering lives in `directives.rs`, and fact assembly lives in `analyze.rs`.
+Tree walking turns already-read source into shared facts that scoring, clone detection, structural rules, directives, and reporting can reuse. Language-specific parsing lives in `crates/scb-check/src/languages/<language>/mod.rs`, the shared `BaseParser` and `LanguageParser` contract live in `languages/mod.rs`, directive filtering lives in `directives.rs`, and project assembly lives in `analyze.rs`.
 
 ## Boundaries
 
@@ -27,7 +27,7 @@ Structural rules consume shared facts, not language-native tree-sitter nodes. Ad
     │
     ├─ read source
     ├─ call `parse_syntax(language, source)`
-    ├─ parse Python directives from comment nodes
+    ├─ parse source directives from language comment nodes
     ├─ build function facts and clone candidates
     └─ collect project-level scoring inputs
 ```
@@ -89,12 +89,12 @@ Clone groups use `blake3` IDs after duplicate bodies are detected.
 
 ## Source Directives
 
-Directives are Python-only in the first cutover. They are parsed from tree-sitter comment nodes so directive-looking text inside strings is inert.
+Directives are parsed from tree-sitter comment nodes so directive-looking text inside strings is inert. Each language adapter normalizes its own comment syntax before generic directive parsing.
 
 Supported directives:
 
-- `# scbc ignore[rule-id]`,
-- `# scbc boundary`.
+- `# scbc ignore[rule-id]` or `// scbc ignore[rule-id]`,
+- `# scbc boundary` or `// scbc boundary`.
 
 Ignore directives target the same line when they follow code, or the next code line when standalone. Boundary directives suppress ast-grep findings inside the containing function. `--include-all` shows ignored and boundary-suppressed findings.
 

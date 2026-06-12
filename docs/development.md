@@ -20,8 +20,8 @@ Implemented analysis paths:
 - Bundled Python `ast-grep` slop patterns through the Rust ast-grep crates, plus optional local rules from `SCB_CHECK_EXTRA_SLOP_RULES`.
 - Rust-coded structural rules over shared Python/Rust facts; the current bundled structural rules are `trivial-wrapper` and opt-in `low-use-short-function`.
 - Cyclomatic and cognitive erosion scores for Python and Rust, with sorted and compensated mass summation for stable JSON calculations.
-- Python source ignores for `ast-grep` and structural rule IDs.
-- Python boundary suppression for validation/normalization functions.
+- Python and Rust source ignores for `ast-grep` and structural rule IDs.
+- Python and Rust boundary suppression for validation/normalization functions.
 
 ## Runtime contracts
 
@@ -29,7 +29,7 @@ Implemented analysis paths:
 - Exit `1` means the run completed and reported findings.
 - Exit `2` is for user-facing failures such as bad config, bad paths, unknown rules, invalid directives, or no discoverable supported source files.
 - Individual parse failures warn and skip the file instead of aborting the run.
-- Rust files skip Python ast-grep rules and source directives. Structural rules run when the shared facts they need are available.
+- Rust files skip Python ast-grep rules. Source directives use language-specific comment syntax.
 - Config discovery and source-directive behavior are user-facing; keep README examples synchronized when they change.
 
 ## Where to make changes
@@ -38,7 +38,7 @@ Implemented analysis paths:
 | --- | --- |
 | Public CLI command or option | `crates/scb-check/src/` |
 | Config loading or path walking | `crates/scb-check/src/config.rs`, `crates/scb-check/src/walk.rs` |
-| Source parsing, `SLOC`, directives, shared facts | `crates/scb-check/src/languages/mod.rs`, `crates/scb-check/src/languages/<language>/parser.rs`, `crates/scb-check/src/facts.rs`, `crates/scb-check/src/directives.rs`, `crates/scb-check/src/analyze.rs` |
+| Source parsing, `SLOC`, directives, shared facts | `crates/scb-check/src/languages/mod.rs`, `crates/scb-check/src/languages/<language>/mod.rs`, `crates/scb-check/src/directives.rs`, `crates/scb-check/src/analyze.rs` |
 | Clone detection | `crates/scb-check/src/clones.rs` |
 | `ast-grep` integration | `crates/scb-check/src/astgrep.rs` and `crates/scb-check/src/languages/python/ast_grep_rules/` |
 | Structural rule behavior | `crates/scb-check/src/rules/` |
@@ -68,7 +68,7 @@ Implemented analysis paths:
 
 1. Add the tree-sitter grammar dependency.
 2. Add a `Language` enum value, parser dispatch in `languages/mod.rs`, suffix mapping, and discovery coverage in Rust.
-3. Add parser lowering in `languages/<language>/parser.rs` for SLOC, functions, complexity, clone fingerprints, comments, and any structural-rule facts the language can provide.
+3. Add parser lowering in `languages/<language>/mod.rs` for SLOC, functions, complexity, clone fingerprints, comments, directive comment syntax, and any structural-rule facts the language can provide.
 4. Add behavioral parser, clone, and pipeline tests.
 5. Document whether ast-grep rules, directives, and structural rules apply to the language.
 

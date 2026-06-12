@@ -6,11 +6,10 @@ use crate::astgrep::{ast_grep_rule_ids, ast_grep_thresholds, run_python_rules};
 use crate::clones::{CloneCandidate, detect_clones, function_clone_candidate};
 use crate::config::LowUseShortFunctionSettings;
 use crate::directives::{
-    BoundaryDirective, IgnoreDirective, ParsedDirectives, filter_ast_grep_findings,
-    filter_structural_findings, parse_source_directives,
+    BoundaryDirective, IgnoreDirective, filter_ast_grep_findings, filter_structural_findings,
+    parse_source_directives,
 };
-use crate::facts::{build_function, function_lines};
-use crate::languages::parse_syntax;
+use crate::languages::{function_lines, lower_function, parse_syntax};
 use crate::model::{
     AstGrepFinding, Function, Language, LanguageSyntaxSummary, Report, SourceFile, SourceLines,
     StructuralFinding,
@@ -231,19 +230,18 @@ fn parse_file(
     let syntax = parse_syntax(file.language, &source)
         .map_err(|error| format!("{}: {error}", file.path.display()))?;
     let sloc_lines = syntax.sloc_lines.clone();
-    let parsed_directives = if file.language == Language::Python {
-        parse_source_directives(&file.path, &source, &syntax.comments, valid_rule_ids)
-            .map_err(|error| format!("directive error: {error}"))?
-    } else {
-        ParsedDirectives {
-            ignores: Vec::new(),
-            boundaries: Vec::new(),
-        }
-    };
+    let parsed_directives = parse_source_directives(
+        file.language,
+        &file.path,
+        &source,
+        &syntax.comments,
+        valid_rule_ids,
+    )
+    .map_err(|error| format!("directive error: {error}"))?;
     let functions: Vec<Function> = syntax
         .functions
         .iter()
-        .map(|span| build_function(&file.path, file.language, span, &lines, &sloc_lines))
+        .map(|span| lower_function(file.language, &file.path, span, &lines, &sloc_lines))
         .collect();
     let clone_candidates = functions
         .iter()

@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use crate::languages::CommentSpan;
-use crate::model::{AstGrepFinding, Function, StructuralFinding};
+use crate::languages::{CommentSpan, directive_text};
+use crate::model::{AstGrepFinding, Function, Language, StructuralFinding};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IgnoreDirective {
@@ -24,6 +24,7 @@ pub struct ParsedDirectives {
 }
 
 pub fn parse_source_directives(
+    language: Language,
     path: &Path,
     source: &str,
     comments: &[CommentSpan],
@@ -37,7 +38,17 @@ pub fn parse_source_directives(
 
     for comment in comments {
         let has_code_before = has_code_before_comment(&lines, comment);
-        match parse_directive_comment(path, comment, has_code_before, &code_lines, valid_rule_ids) {
+        let Some(comment_text) = directive_text(language, comment) else {
+            continue;
+        };
+        match parse_directive_comment(
+            path,
+            comment.line,
+            comment_text,
+            has_code_before,
+            &code_lines,
+            valid_rule_ids,
+        ) {
             Ok(Some(ParsedDirectiveLine::Ignore(ignore))) => ignores.push(ignore),
             Ok(Some(ParsedDirectiveLine::Boundary(boundary))) => boundaries.push(boundary),
             Ok(None) => {}
@@ -62,23 +73,19 @@ enum ParsedDirectiveLine {
 
 fn parse_directive_comment(
     path: &Path,
-    comment: &CommentSpan,
+    line: usize,
+    comment_text: &str,
     has_code_before: bool,
     code_lines: &BTreeSet<usize>,
     valid_rule_ids: &BTreeSet<String>,
 ) -> Result<Option<ParsedDirectiveLine>, String> {
-    let comment_text = comment
-        .text
-        .strip_prefix('#')
-        .unwrap_or(&comment.text)
-        .trim();
     if !comment_text.starts_with("scbc") {
         return Ok(None);
     }
     if let Some(raw_rule_ids) = ignore_rule_ids(comment_text) {
         return parse_ignore(
             path,
-            comment.line,
+            line,
             raw_rule_ids,
             has_code_before,
             code_lines,
@@ -89,7 +96,7 @@ fn parse_directive_comment(
     if is_boundary(comment_text) {
         return Ok(Some(ParsedDirectiveLine::Boundary(BoundaryDirective {
             file: path.to_path_buf(),
-            directive_line: comment.line,
+            directive_line: line,
         })));
     }
     Ok(None)
@@ -303,6 +310,15 @@ fn is_ignored(file: &Path, line: usize, rule_id: &str, ignores: &[IgnoreDirectiv
 mod tests {
     use crate::test_support::{analyze_dir, test_dir, write};
 
+    fn assert_source_has_no_findings(filename: &str, source: &str) {
+        let root = test_dir();
+        write(&root.join(filename), source);
+
+        let report = analyze_dir(&root, true, false, None).expect("analysis should succeed");
+
+        assert!(!report.has_findings());
+    }
+
     #[test]
     fn source_ignore_directives_suppress_ast_grep_and_structural_findings() {
         let root = test_dir();
@@ -382,9 +398,8 @@ value = 1
 
     #[test]
     fn source_directive_text_inside_python_string_is_ignored() {
-        let root = test_dir();
-        write(
-            &root.join("sample.py"),
+        assert_source_has_no_findings(
+            "sample.py",
             r##"
 def marker():
     return "# scbc ignore[not-a-rule]"
@@ -394,9 +409,18 @@ def identity(value):
     return value
 "##,
         );
+    }
 
-        let report = analyze_dir(&root, true, false, None).expect("analysis should succeed");
-
-        assert!(!report.has_findings());
+    #[test]
+    fn rust_line_comment_directives_suppress_structural_findings() {
+        assert_source_has_no_findings(
+            "sample.rs",
+            r"
+// scbc ignore[trivial-wrapper]
+fn identity(value: i32) -> i32 {
+    value
+}
+",
+        );
     }
 }

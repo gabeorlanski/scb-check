@@ -96,7 +96,7 @@ enabled = true
 
 Configured `exclude` patterns still apply when `--include-all` is used; only `.gitignore` file discovery is extended.
 
-Ast-grep slop rules and source directives are currently Python-only. Rust participates in SLOC totals, clone detection, structural rules where shared facts are available, cyclomatic erosion, and cognitive erosion. JavaScript, TypeScript, Go, Zig, Haskell, and C++ are outside the first Rust cutover scan target set.
+Ast-grep slop rules are currently Python-only. Source directives are parsed from Python and Rust comments. JavaScript, TypeScript, Go, Zig, Haskell, and C++ are outside the first Rust cutover scan target set.
 
 When using `pyproject.toml`, scb-check also includes excludes from:
 
@@ -106,11 +106,20 @@ When using `pyproject.toml`, scb-check also includes excludes from:
 
 ## Source directives
 
-In Python files, you can suppress specific ast-grep or structural rule findings at the source line level with:
+In Python and Rust files, you can suppress specific ast-grep or structural rule findings at the source line level with:
 
 ```python
 # scbc ignore[rule-id]
 # scbc ignore[trivial-wrapper]
+```
+
+Rust uses the same directive text after `//` or `/* ... */` comments:
+
+```rust
+// scbc ignore[trivial-wrapper]
+fn identity(value: i32) -> i32 {
+    value
+}
 ```
 
 Same-line form:
@@ -143,7 +152,7 @@ def _load_toml(path: Path) -> dict[str, Any]:
     ...
 ```
 
-Boundary directives must be inside the function body, after the `def` line. By default, ast-grep findings inside that function are hidden, and informational ast-grep rules are omitted. Use `--include-all` to show ignored, informational, and boundary-suppressed ast-grep findings.
+Boundary directives must be inside the function body, after the function signature line. By default, ast-grep findings inside that function are hidden, and informational ast-grep rules are omitted. Use `--include-all` to show ignored, informational, and boundary-suppressed ast-grep findings.
 
 Rules:
 
