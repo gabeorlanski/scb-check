@@ -19,8 +19,8 @@ pub(crate) struct BoundaryDirective {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ParsedDirectives {
-    pub ignores: Vec<IgnoreDirective>,
-    pub boundaries: Vec<BoundaryDirective>,
+    pub(crate) ignores: Vec<IgnoreDirective>,
+    pub(crate) boundaries: Vec<BoundaryDirective>,
 }
 
 pub(crate) fn parse_source_directives(

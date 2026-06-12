@@ -4,13 +4,13 @@ use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CheckOptions {
-    pub path: PathBuf,
-    pub output_json: bool,
-    pub include_all: bool,
-    pub disable_sg: bool,
-    pub min_duplicate_lines: Option<usize>,
-    pub config_path: Option<PathBuf>,
-    pub verbosity: u8,
+    pub(crate) path: PathBuf,
+    pub(crate) output_json: bool,
+    pub(crate) include_all: bool,
+    pub(crate) disable_sg: bool,
+    pub(crate) min_duplicate_lines: Option<usize>,
+    pub(crate) config_path: Option<PathBuf>,
+    pub(crate) verbosity: u8,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,7 +22,7 @@ pub(crate) enum Command {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Cli {
-    pub command: Command,
+    pub(crate) command: Command,
 }
 
 #[derive(Debug, Parser)]

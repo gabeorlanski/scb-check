@@ -6,21 +6,21 @@ use toml::map::Map;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Config {
-    pub exclude: Vec<String>,
-    pub base_dir: PathBuf,
-    pub context_lines: usize,
-    pub low_use_short_function: LowUseShortFunctionSettings,
+    pub(crate) exclude: Vec<String>,
+    pub(crate) base_dir: PathBuf,
+    pub(crate) context_lines: usize,
+    pub(crate) low_use_short_function: LowUseShortFunctionSettings,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LowUseShortFunctionSettings {
-    pub enabled: bool,
-    pub max_call_sites: usize,
-    pub max_function_sloc: usize,
-    pub max_inline_caller_sloc: usize,
-    pub max_inline_caller_complexity: usize,
-    pub max_inline_caller_cognitive_complexity: usize,
-    pub max_inline_call_nesting: usize,
+    pub(crate) enabled: bool,
+    pub(crate) max_call_sites: usize,
+    pub(crate) max_function_sloc: usize,
+    pub(crate) max_inline_caller_sloc: usize,
+    pub(crate) max_inline_caller_complexity: usize,
+    pub(crate) max_inline_caller_cognitive_complexity: usize,
+    pub(crate) max_inline_call_nesting: usize,
 }
 
 impl Default for LowUseShortFunctionSettings {

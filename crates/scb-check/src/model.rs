@@ -17,37 +17,45 @@ impl Language {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SourceFile {
-    pub path: PathBuf,
-    pub language: Language,
+    pub(crate) path: PathBuf,
+    pub(crate) language: Language,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SourceLines {
-    pub file: PathBuf,
-    pub lines: Vec<String>,
+    pub(crate) file: PathBuf,
+    pub(crate) lines: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Function {
-    pub file: PathBuf,
-    pub language: Language,
-    pub name: String,
-    pub params: Vec<String>,
-    pub start_line: usize,
-    pub end_line: usize,
-    pub sloc: usize,
-    pub cyclomatic: usize,
-    pub cognitive: usize,
-    pub max_nesting: usize,
-    pub calls: Vec<CallSite>,
-    pub body_shape: BodyShape,
+    pub(crate) file: PathBuf,
+    pub(crate) language: Language,
+    pub(crate) name: String,
+    pub(crate) params: Vec<String>,
+    pub(crate) start_line: usize,
+    pub(crate) end_line: usize,
+    pub(crate) sloc: usize,
+    pub(crate) cyclomatic: usize,
+    pub(crate) cognitive: usize,
+    pub(crate) max_nesting: usize,
+    pub(crate) calls: Vec<CallSite>,
+    pub(crate) body_shape: BodyShape,
 }
 
 impl Function {
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "Report mass formulas intentionally use f64 to preserve the existing JSON score contract."
+    )]
     pub(crate) fn cc_mass(&self) -> f64 {
         self.cyclomatic as f64 * (self.sloc as f64).sqrt()
     }
 
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "Report mass formulas intentionally use f64 to preserve the existing JSON score contract."
+    )]
     pub(crate) fn cog_mass(&self) -> f64 {
         self.cognitive as f64 * (self.sloc as f64).sqrt()
     }
@@ -63,9 +71,9 @@ impl Function {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CallSite {
-    pub name: String,
-    pub line: usize,
-    pub nesting: usize,
+    pub(crate) name: String,
+    pub(crate) line: usize,
+    pub(crate) nesting: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,71 +85,75 @@ pub(crate) enum BodyShape {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CloneBlock {
-    pub file: PathBuf,
-    pub start_line: usize,
-    pub end_line: usize,
-    pub group_hash: String,
-    pub instance_count: usize,
-    pub first_lines: Vec<String>,
+    pub(crate) file: PathBuf,
+    pub(crate) start_line: usize,
+    pub(crate) end_line: usize,
+    pub(crate) group_hash: String,
+    pub(crate) instance_count: usize,
+    pub(crate) first_lines: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AstGrepFinding {
-    pub rule_id: String,
-    pub severity: String,
-    pub message: String,
-    pub file: PathBuf,
-    pub start_line: usize,
-    pub end_line: usize,
-    pub start_col: usize,
-    pub end_col: usize,
-    pub matched_text: String,
+    pub(crate) rule_id: String,
+    pub(crate) severity: String,
+    pub(crate) message: String,
+    pub(crate) file: PathBuf,
+    pub(crate) start_line: usize,
+    pub(crate) end_line: usize,
+    pub(crate) start_col: usize,
+    pub(crate) end_col: usize,
+    pub(crate) matched_text: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct StructuralFinding {
-    pub rule_id: &'static str,
-    pub severity: &'static str,
-    pub message: String,
-    pub fix_title: Option<String>,
-    pub file: PathBuf,
-    pub start_line: usize,
-    pub end_line: usize,
-    pub subject_name: String,
+    pub(crate) rule_id: &'static str,
+    pub(crate) severity: &'static str,
+    pub(crate) message: String,
+    pub(crate) fix_title: Option<String>,
+    pub(crate) file: PathBuf,
+    pub(crate) start_line: usize,
+    pub(crate) end_line: usize,
+    pub(crate) subject_name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LanguageSyntaxSummary {
-    pub language: Language,
-    pub tree_count: usize,
-    pub node_count: usize,
+    pub(crate) language: Language,
+    pub(crate) tree_count: usize,
+    pub(crate) node_count: usize,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct Report {
-    pub files_scanned: usize,
-    pub total_loc: usize,
-    pub verbosity_flagged_loc: usize,
-    pub clone_loc: usize,
-    pub ast_grep_flagged_loc: usize,
-    pub structural_rule_loc: usize,
-    pub structural_rule_findings: usize,
-    pub total_functions: usize,
-    pub high_cc_functions: usize,
-    pub high_cog_functions: usize,
-    pub total_mass: f64,
-    pub high_cc_mass: f64,
-    pub total_cog_mass: f64,
-    pub high_cog_mass: f64,
-    pub syntax_by_language: Vec<LanguageSyntaxSummary>,
-    pub clones: Vec<CloneBlock>,
-    pub functions: Vec<Function>,
-    pub ast_grep_findings: Vec<AstGrepFinding>,
-    pub structural_findings: Vec<StructuralFinding>,
-    pub source_lines: Vec<SourceLines>,
+    pub(crate) files_scanned: usize,
+    pub(crate) total_loc: usize,
+    pub(crate) verbosity_flagged_loc: usize,
+    pub(crate) clone_loc: usize,
+    pub(crate) ast_grep_flagged_loc: usize,
+    pub(crate) structural_rule_loc: usize,
+    pub(crate) structural_rule_findings: usize,
+    pub(crate) total_functions: usize,
+    pub(crate) high_cc_functions: usize,
+    pub(crate) high_cog_functions: usize,
+    pub(crate) total_mass: f64,
+    pub(crate) high_cc_mass: f64,
+    pub(crate) total_cog_mass: f64,
+    pub(crate) high_cog_mass: f64,
+    pub(crate) syntax_by_language: Vec<LanguageSyntaxSummary>,
+    pub(crate) clones: Vec<CloneBlock>,
+    pub(crate) functions: Vec<Function>,
+    pub(crate) ast_grep_findings: Vec<AstGrepFinding>,
+    pub(crate) structural_findings: Vec<StructuralFinding>,
+    pub(crate) source_lines: Vec<SourceLines>,
 }
 
 impl Report {
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "Verbosity is defined as an f64 JSON ratio over LOC counts and must match prior calculations."
+    )]
     pub(crate) fn verbosity(&self) -> f64 {
         ratio(self.verbosity_flagged_loc as f64, self.total_loc as f64)
     }

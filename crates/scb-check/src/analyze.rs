@@ -584,7 +584,7 @@ fn branch(value: i32) -> i32 {
         expected: serde_json::Value,
     }
 
-    #[allow(
+    #[expect(
         clippy::approx_constant,
         clippy::too_many_lines,
         clippy::unreadable_literal,

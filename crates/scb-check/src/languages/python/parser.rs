@@ -61,6 +61,10 @@ impl PythonLanguageParser {
         lines
     }
 
+    #[expect(
+        clippy::needless_collect,
+        reason = "tree-sitter child iterators are not DoubleEndedIterator; collecting is required to reverse children while preserving token order."
+    )]
     fn collect_python_sloc_token_lines(source: &str, node: Node<'_>, lines: &mut BTreeSet<usize>) {
         let mut stack = vec![node];
         while let Some(current) = stack.pop() {

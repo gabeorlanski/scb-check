@@ -12,16 +12,16 @@ pub(crate) enum FixAvailability {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RuleMetadata {
-    pub id: &'static str,
-    pub severity: &'static str,
-    pub target: &'static str,
-    pub message: &'static str,
+    pub(crate) id: &'static str,
+    pub(crate) severity: &'static str,
+    pub(crate) target: &'static str,
+    pub(crate) message: &'static str,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct RuleContext<'a> {
-    pub functions: &'a [Function],
-    pub low_use_short_function: &'a LowUseShortFunctionSettings,
+    pub(crate) functions: &'a [Function],
+    pub(crate) low_use_short_function: &'a LowUseShortFunctionSettings,
 }
 
 pub(crate) trait Violation {

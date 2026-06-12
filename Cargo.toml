@@ -13,7 +13,3 @@ all = { level = "deny", priority = -1 }
 cargo = { level = "deny", priority = -1 }
 nursery = { level = "deny", priority = -1 }
 pedantic = { level = "deny", priority = -1 }
-cast_precision_loss = "allow"
-multiple_crate_versions = "allow"
-needless_collect = "allow"
-redundant_pub_crate = "allow"

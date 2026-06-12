@@ -1,5 +1,14 @@
 //! Rust implementation of the `scb-check` command-line interface.
 
+#![expect(
+    clippy::multiple_crate_versions,
+    reason = "Indirect ast-grep/toml dependencies currently resolve two winnow versions; no direct dependency pin fixes this without upstream churn."
+)]
+#![expect(
+    clippy::redundant_pub_crate,
+    reason = "`unreachable_pub` requires crate-private internals; private modules with sibling access intentionally use `pub(crate)`."
+)]
+
 pub(crate) mod analyze;
 pub(crate) mod args;
 pub(crate) mod astgrep;

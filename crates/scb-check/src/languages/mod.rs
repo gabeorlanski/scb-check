@@ -9,31 +9,31 @@ pub(crate) mod rust;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CommentSpan {
-    pub line: usize,
-    pub column: usize,
-    pub end_line: usize,
-    pub end_column: usize,
-    pub text: String,
+    pub(crate) line: usize,
+    pub(crate) column: usize,
+    pub(crate) end_line: usize,
+    pub(crate) end_column: usize,
+    pub(crate) text: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FunctionSpan {
-    pub name: String,
-    pub start_line: usize,
-    pub end_line: usize,
-    pub signature: String,
-    pub cyclomatic: usize,
-    pub cognitive: usize,
-    pub max_nesting: usize,
-    pub clone_fingerprint: Vec<String>,
+    pub(crate) name: String,
+    pub(crate) start_line: usize,
+    pub(crate) end_line: usize,
+    pub(crate) signature: String,
+    pub(crate) cyclomatic: usize,
+    pub(crate) cognitive: usize,
+    pub(crate) max_nesting: usize,
+    pub(crate) clone_fingerprint: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ParsedSyntax {
-    pub functions: Vec<FunctionSpan>,
-    pub comments: Vec<CommentSpan>,
-    pub sloc_lines: BTreeSet<usize>,
-    pub node_count: usize,
+    pub(crate) functions: Vec<FunctionSpan>,
+    pub(crate) comments: Vec<CommentSpan>,
+    pub(crate) sloc_lines: BTreeSet<usize>,
+    pub(crate) node_count: usize,
 }
 
 pub(crate) trait LanguageParser {
@@ -125,6 +125,10 @@ impl BaseParser {
         })
     }
 
+    #[expect(
+        clippy::needless_collect,
+        reason = "tree-sitter child iterators are not DoubleEndedIterator; collecting is required to reverse children while preserving DFS order."
+    )]
     fn collect_nodes<T>(root: Node<'_>, mut collect: impl FnMut(Node<'_>) -> Option<T>) -> Vec<T> {
         let mut items = Vec::new();
         let mut stack = vec![root];
@@ -305,6 +309,10 @@ fn clone_statement_fingerprint(
     (!tokens.is_empty()).then(|| tokens.join(""))
 }
 
+#[expect(
+    clippy::needless_collect,
+    reason = "tree-sitter child iterators are not DoubleEndedIterator; collecting is required to reverse children while preserving clone-token order."
+)]
 fn collect_clone_tokens(
     source: &str,
     node: Node<'_>,
