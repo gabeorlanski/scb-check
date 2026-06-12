@@ -4,6 +4,7 @@ pub(crate) mod astgrep;
 pub(crate) mod clones;
 pub(crate) mod config;
 pub(crate) mod directives;
+pub(crate) mod facts;
 pub(crate) mod model;
 pub(crate) mod parser;
 pub(crate) mod render;

@@ -7,38 +7,13 @@ struct StructuralRuleMetadata {
     severity: &'static str,
     target: &'static str,
     message: &'static str,
-    capabilities: &'static [RuleCapability],
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RuleCapability {
-    FunctionFacts,
-    CallSites,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct RuleContext<'a> {
-    functions: &'a [Function],
-    low_use_short_function: &'a LowUseShortFunctionSettings,
-}
-
-trait StructuralRule {
-    fn metadata(&self) -> StructuralRuleMetadata;
-    fn check(&self, context: &RuleContext<'_>) -> Vec<StructuralFinding>;
-}
-
-#[derive(Debug, Clone, Copy)]
-struct TrivialWrapperRule;
-
-#[derive(Debug, Clone, Copy)]
-struct LowUseShortFunctionRule;
 
 const TRIVIAL_WRAPPER_METADATA: StructuralRuleMetadata = StructuralRuleMetadata {
     id: "trivial-wrapper",
     severity: "warning",
     target: "symbol",
     message: "Function adds no behavior.",
-    capabilities: &[RuleCapability::FunctionFacts],
 };
 
 const LOW_USE_SHORT_FUNCTION_METADATA: StructuralRuleMetadata = StructuralRuleMetadata {
@@ -46,7 +21,6 @@ const LOW_USE_SHORT_FUNCTION_METADATA: StructuralRuleMetadata = StructuralRuleMe
     severity: "info",
     target: "symbol",
     message: "Short low-use function can be inlined safely.",
-    capabilities: &[RuleCapability::FunctionFacts, RuleCapability::CallSites],
 };
 
 pub(crate) fn structural_rule_ids() -> Vec<&'static str> {
@@ -70,64 +44,13 @@ pub(crate) fn run_structural_rules(
     functions: &[Function],
     low_use_short_function: &LowUseShortFunctionSettings,
 ) -> Vec<StructuralFinding> {
-    let context = RuleContext {
+    let mut findings = Vec::new();
+    findings.extend(functions.iter().filter_map(trivial_wrapper));
+    findings.extend(low_use_short_function_findings(
         functions,
         low_use_short_function,
-    };
-    let rules: [&dyn StructuralRule; 2] = [&TrivialWrapperRule, &LowUseShortFunctionRule];
-    let mut findings = Vec::new();
-    for rule in rules {
-        if RuleContext::supports(rule.metadata().capabilities) {
-            findings.extend(rule.check(&context));
-        }
-    }
+    ));
     findings
-}
-
-impl RuleContext<'_> {
-    fn supports(capabilities: &[RuleCapability]) -> bool {
-        capabilities
-            .iter()
-            .all(|capability| Self::supports_capability(*capability))
-    }
-
-    const fn supports_capability(capability: RuleCapability) -> bool {
-        match capability {
-            RuleCapability::FunctionFacts | RuleCapability::CallSites => true,
-        }
-    }
-}
-
-impl StructuralRule for TrivialWrapperRule {
-    fn metadata(&self) -> StructuralRuleMetadata {
-        TRIVIAL_WRAPPER_METADATA
-    }
-
-    fn check(&self, context: &RuleContext<'_>) -> Vec<StructuralFinding> {
-        context
-            .functions
-            .iter()
-            .filter_map(trivial_wrapper)
-            .collect()
-    }
-}
-
-impl StructuralRule for LowUseShortFunctionRule {
-    fn metadata(&self) -> StructuralRuleMetadata {
-        LOW_USE_SHORT_FUNCTION_METADATA
-    }
-
-    fn check(&self, context: &RuleContext<'_>) -> Vec<StructuralFinding> {
-        if !context.low_use_short_function.enabled {
-            return Vec::new();
-        }
-
-        context
-            .functions
-            .iter()
-            .filter_map(|function| low_use_short_function(function, context))
-            .collect()
-    }
 }
 
 const fn structural_rule_metadata() -> &'static [StructuralRuleMetadata] {
@@ -166,14 +89,14 @@ fn forwards_only_params(function: &Function, args: &[String]) -> bool {
 
 fn low_use_short_function(
     function: &Function,
-    context: &RuleContext<'_>,
+    functions: &[Function],
+    settings: &LowUseShortFunctionSettings,
 ) -> Option<StructuralFinding> {
-    let settings = context.low_use_short_function;
     if function.sloc > settings.max_function_sloc {
         return None;
     }
 
-    let call_sites = call_sites_for(function, context.functions);
+    let call_sites = call_sites_for(function, functions);
     if call_sites.is_empty() || call_sites.len() > settings.max_call_sites {
         return None;
     }
@@ -190,6 +113,20 @@ fn low_use_short_function(
         end_line: function.end_line,
         subject_name: function.name.clone(),
     })
+}
+
+fn low_use_short_function_findings(
+    functions: &[Function],
+    settings: &LowUseShortFunctionSettings,
+) -> Vec<StructuralFinding> {
+    if !settings.enabled {
+        return Vec::new();
+    }
+
+    functions
+        .iter()
+        .filter_map(|function| low_use_short_function(function, functions, settings))
+        .collect()
 }
 
 fn call_sites_for<'a>(

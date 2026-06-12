@@ -45,24 +45,8 @@ pub(crate) fn render_human(
 ) -> String {
     let mut entries = Vec::new();
     append_clone_entries(&mut entries, report, min_duplicate_lines);
-    append_finding_entries(
-        &mut entries,
-        &report.ast_grep_findings,
-        report,
-        context_lines,
-        finding_location,
-        render_ast_grep,
-        1,
-    );
-    append_finding_entries(
-        &mut entries,
-        &report.structural_findings,
-        report,
-        context_lines,
-        finding_location,
-        render_structural,
-        2,
-    );
+    append_ast_grep_entries(&mut entries, report, context_lines);
+    append_structural_entries(&mut entries, report, context_lines);
     append_complexity_entries(&mut entries, report, context_lines);
     entries.sort_by(|left, right| left.key.cmp(&right.key));
     entries
@@ -92,51 +76,30 @@ fn append_clone_entries(
     }
 }
 
-fn append_finding_entries<T>(
+fn append_ast_grep_entries(
     entries: &mut Vec<RenderedEntry>,
-    findings: &[T],
     report: &Report,
     context_lines: usize,
-    location: impl Fn(&T) -> (&Path, usize),
-    render: impl Fn(&T, &Report, usize) -> String,
-    kind_rank: u8,
 ) {
-    for finding in findings {
-        let (file, line) = location(finding);
+    for finding in &report.ast_grep_findings {
         entries.push(RenderedEntry {
-            key: render_key(file, line, kind_rank),
-            text: render(finding, report, context_lines),
+            key: render_key(&finding.file, finding.start_line, 1),
+            text: render_ast_grep(finding, report, context_lines),
         });
     }
 }
 
-trait FindingLocation {
-    fn file(&self) -> &Path;
-    fn start_line(&self) -> usize;
-}
-
-impl FindingLocation for AstGrepFinding {
-    fn file(&self) -> &Path {
-        &self.file
+fn append_structural_entries(
+    entries: &mut Vec<RenderedEntry>,
+    report: &Report,
+    context_lines: usize,
+) {
+    for finding in &report.structural_findings {
+        entries.push(RenderedEntry {
+            key: render_key(&finding.file, finding.start_line, 2),
+            text: render_structural(finding, report, context_lines),
+        });
     }
-
-    fn start_line(&self) -> usize {
-        self.start_line
-    }
-}
-
-impl FindingLocation for StructuralFinding {
-    fn file(&self) -> &Path {
-        &self.file
-    }
-
-    fn start_line(&self) -> usize {
-        self.start_line
-    }
-}
-
-fn finding_location<T: FindingLocation>(finding: &T) -> (&Path, usize) {
-    (finding.file(), finding.start_line())
 }
 
 fn append_complexity_entries(
