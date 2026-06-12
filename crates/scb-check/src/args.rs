@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{ArgAction, Parser, Subcommand, ValueEnum};
+use clap::{ArgAction, Parser, Subcommand, ValueEnum, error::ErrorKind};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckOptions {
@@ -25,12 +25,14 @@ pub struct Cli {
     pub command: Command,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParseArgsError {
+    Help(String),
+    Usage(String),
+}
+
 #[derive(Debug, Parser)]
-#[command(
-    name = "scb-check",
-    disable_help_flag = true,
-    disable_version_flag = true
-)]
+#[command(name = "scb-check", disable_version_flag = true)]
 struct RawCli {
     #[command(subcommand)]
     command: RawCommand,
@@ -67,13 +69,13 @@ enum OutputFormat {
     Json,
 }
 
-pub fn parse_args<I>(raw_args: I) -> Result<Cli, String>
+pub fn parse_args<I>(raw_args: I) -> Result<Cli, ParseArgsError>
 where
     I: IntoIterator<Item = String>,
 {
     let args: Vec<String> = raw_args.into_iter().collect();
     if args.is_empty() {
-        return Err("missing command".to_string());
+        return Err(ParseArgsError::Usage("missing command".to_string()));
     }
     if args == ["--version"] {
         return Ok(Cli {
@@ -87,11 +89,19 @@ where
     let output_json = output_json_from_args(&clap_args[1..]);
     let mut cli: Cli = RawCli::try_parse_from(clap_args)
         .map(Into::into)
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| parse_error(&error))?;
     if let (Some(output_json), Command::Check(options)) = (output_json, &mut cli.command) {
         options.output_json = output_json;
     }
     Ok(cli)
+}
+
+fn parse_error(error: &clap::Error) -> ParseArgsError {
+    if error.kind() == ErrorKind::DisplayHelp {
+        ParseArgsError::Help(error.to_string())
+    } else {
+        ParseArgsError::Usage(error.to_string())
+    }
 }
 
 impl From<RawCli> for Cli {
@@ -172,7 +182,7 @@ fn output_json_value(value: &str) -> Option<bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Command, parse_args};
+    use super::{Command, ParseArgsError, parse_args};
 
     #[test]
     fn output_format_and_report_keep_last_option_wins_behavior() {
@@ -222,5 +232,22 @@ mod tests {
         let version = parse_args(std::iter::once("--version").map(str::to_string))
             .expect("version should parse");
         assert_eq!(version.command, Command::Version);
+    }
+
+    #[test]
+    fn help_requests_are_not_usage_errors() {
+        let root_help = parse_args(std::iter::once("--help").map(str::to_string))
+            .expect_err("help should short-circuit parsing");
+        let ParseArgsError::Help(root_help) = root_help else {
+            panic!("expected help error");
+        };
+        assert!(root_help.contains("Usage: scb-check"));
+
+        let check_help = parse_args(["check", "--help"].into_iter().map(str::to_string))
+            .expect_err("check help should short-circuit parsing");
+        let ParseArgsError::Help(check_help) = check_help else {
+            panic!("expected check help error");
+        };
+        assert!(check_help.contains("Usage: scb-check check"));
     }
 }

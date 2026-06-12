@@ -71,6 +71,9 @@ impl BaseParser {
     ) -> Result<ParsedSyntax, String> {
         let tree = self.parse_tree(source)?;
         let root = tree.root_node();
+        if root.has_error() {
+            return Err(format!("failed to parse {} source", self.label));
+        }
         let functions = Self::collect_functions(language_parser, source, root);
         let comments = Self::collect_comments(language_parser, source, root);
         let sloc_lines = language_parser.sloc_lines(source, root, &comments);
@@ -473,5 +476,14 @@ fn classify(value: i32) -> &'static str {
         assert_eq!(python.functions[0].cognitive, 0);
         assert_eq!(rust.functions[0].cyclomatic, 2);
         assert_eq!(rust.functions[0].cognitive, 1);
+    }
+
+    #[test]
+    fn parser_rejects_syntax_error_trees() {
+        let python = parse_syntax(Language::Python, "def broken(:\n    return 1\n");
+        let rust = parse_syntax(Language::Rust, "fn broken( {\n    1\n}\n");
+
+        assert!(python.is_err());
+        assert!(rust.is_err());
     }
 }

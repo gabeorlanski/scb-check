@@ -16,7 +16,7 @@ mod walk;
 use std::process::ExitCode;
 
 use analyze::analyze;
-use args::{CheckOptions, Command, parse_args};
+use args::{CheckOptions, Command, ParseArgsError, parse_args};
 use astgrep::ast_grep_rule_document;
 use config::load_config;
 use model::Report;
@@ -42,7 +42,14 @@ fn run<I>(raw_args: I) -> Result<ExitCode, String>
 where
     I: IntoIterator<Item = String>,
 {
-    let cli = parse_args(raw_args)?;
+    let cli = match parse_args(raw_args) {
+        Ok(cli) => cli,
+        Err(ParseArgsError::Help(message)) => {
+            print!("{message}");
+            return Ok(ExitCode::SUCCESS);
+        }
+        Err(ParseArgsError::Usage(message)) => return Err(message),
+    };
     match cli.command {
         Command::Check(options) => run_check(&options),
         Command::Rule(rule_id) => run_rule(&rule_id),
