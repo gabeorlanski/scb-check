@@ -10,35 +10,35 @@ use crate::model::AstGrepFinding;
 const BUNDLED_RULES: &[(&str, &str)] = &[
     (
         "boolean_and_comparison.yaml",
-        include_str!("../resources/slop_rules/boolean_and_comparison.yaml"),
+        include_str!("languages/python/ast_grep_rules/boolean_and_comparison.yaml"),
     ),
     (
         "conditionals.yaml",
-        include_str!("../resources/slop_rules/conditionals.yaml"),
+        include_str!("languages/python/ast_grep_rules/conditionals.yaml"),
     ),
     (
         "defensive.yaml",
-        include_str!("../resources/slop_rules/defensive.yaml"),
+        include_str!("languages/python/ast_grep_rules/defensive.yaml"),
     ),
     (
         "dict_patterns.yaml",
-        include_str!("../resources/slop_rules/dict_patterns.yaml"),
+        include_str!("languages/python/ast_grep_rules/dict_patterns.yaml"),
     ),
     (
         "loops_and_comprehensions.yaml",
-        include_str!("../resources/slop_rules/loops_and_comprehensions.yaml"),
+        include_str!("languages/python/ast_grep_rules/loops_and_comprehensions.yaml"),
     ),
     (
         "misc.yaml",
-        include_str!("../resources/slop_rules/misc.yaml"),
+        include_str!("languages/python/ast_grep_rules/misc.yaml"),
     ),
     (
         "type_annotations.yaml",
-        include_str!("../resources/slop_rules/type_annotations.yaml"),
+        include_str!("languages/python/ast_grep_rules/type_annotations.yaml"),
     ),
     (
         "type_conversions.yaml",
-        include_str!("../resources/slop_rules/type_conversions.yaml"),
+        include_str!("languages/python/ast_grep_rules/type_conversions.yaml"),
     ),
 ];
 

@@ -159,7 +159,7 @@ Rules:
 
 - **Tree walking**: Rust tree-sitter parsing emits shared Python/Rust facts for SLOC, functions, comments, complexity, call sites, and clone fingerprints.
 - **Clone detection**: hashed parser-derived function-body fingerprints across the scanned set; two or more matching instances become a `CloneBlock`.
-- **Slop patterns**: Python ast-grep rules in `crates/scb-check/resources/slop_rules/` split by category (e.g. `range(len(x))`, `dict.get(k, None)`, `isinstance` ladders, manual min/max, defensive guards).
+- **Slop patterns**: Python ast-grep rules in `crates/scb-check/src/languages/python/ast_grep_rules/` split by category (e.g. `range(len(x))`, `dict.get(k, None)`, `isinstance` ladders, manual min/max, defensive guards).
 - **Structural rules**: Rust-coded structural rules run over shared Python/Rust facts. `trivial-wrapper` flags removable single-return pass-through functions, and `low-use-short-function` flags short helpers with few call sites only when inlining them stays within configured caller SLOC, complexity, cognitive complexity, and nesting budgets.
 - **Extra local slop patterns**: set `SCB_CHECK_EXTRA_SLOP_RULES` to a `:`-separated list of YAML paths to layer additional rules on top of the bundled set.
 - **Complexity**: per-function cyclomatic and cognitive complexity plus SLOC, combined into mass scores for erosion metrics with stable sorted and compensated summation.

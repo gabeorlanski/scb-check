@@ -1,6 +1,6 @@
 # Tree walking
 
-Tree walking turns already-read source into shared facts that scoring, clone detection, structural rules, directives, and reporting can reuse. In the Rust cutover this lives primarily in `crates/scb-check/src/parser.rs`, with directive filtering in `directives.rs` and fact assembly in `analyze.rs`.
+Tree walking turns already-read source into shared facts that scoring, clone detection, structural rules, directives, and reporting can reuse. Language-specific parsing lives in `crates/scb-check/src/languages/<language>/parser.rs`, shared parser helpers live in `languages/base.rs`, directive filtering lives in `directives.rs`, and fact assembly lives in `analyze.rs`.
 
 ## Boundaries
 

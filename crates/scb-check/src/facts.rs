@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
+use crate::languages::FunctionSpan;
 use crate::model::{BodyShape, CallSite, Function, Language};
-use crate::parser::FunctionSpan;
 
 pub(crate) fn build_function(
     path: &Path,

@@ -53,9 +53,9 @@ CLI (`crates/scb-check`, via `src/scb_check/cli.py` package shim)
 ## Layers
 
 - Boundary: the Rust crate parses public CLI arguments, loads configuration, walks paths, and renders output. `src/scb_check/cli.py` is only the Python package console-script shim that delegates to the packaged Rust binary.
-- Parsing and facts: `crates/scb-check/src/parser.rs`, `directives.rs`, and `analyze.rs` parse already-read Python/Rust source, compute `SLOC`, parse Python source directives, and build shared facts.
+- Parsing and facts: `crates/scb-check/src/languages/`, `facts.rs`, `directives.rs`, and `analyze.rs` parse already-read Python/Rust source, compute `SLOC`, parse Python source directives, and build shared facts.
 - Analysis integrations: `clones.rs` owns normalized clone hashing, and `astgrep.rs` owns in-process ast-grep matching for bundled and extra Python YAML rules.
-- Rules: `rules.rs` owns structural rule metadata, registration, capability declarations, and Rust-coded rule implementations.
+- Rules: `rules/` owns structural rule metadata, registration, and Rust-coded rule implementations.
 - Reporting: `render.rs` turns reports into JSON or human-readable flag text. JSON reports include score summaries plus syntax tree and node counts by parsed language.
 - Shared models: `model.rs` contains shared Rust records for source files, functions, findings, syntax summaries, and reports.
 
@@ -79,9 +79,6 @@ CLI (`crates/scb-check`, via `src/scb_check/cli.py` package shim)
 `structural rule`
 : Rust-coded rule that checks shared Python/Rust facts and returns a structural finding.
 
-`RuleContext`
-: Query interface passed to structural rules so rules ask shared fact questions instead of inspecting parser-native syntax.
-
 `RuleFinding`
 : Fixed-field structural finding with rule ID, severity, message, span, and subject metadata.
 
@@ -100,15 +97,15 @@ CLI (`crates/scb-check`, via `src/scb_check/cli.py` package shim)
 
 Change these only with tests and documentation updates because they move user-visible scores:
 
-- parser-derived `SLOC` exclusions in `parser.rs`,
-- clone fingerprint normalization in `parser.rs` and duplicate grouping in `clones.rs`,
-- cyclomatic and cognitive complexity node sets in `parser.rs`,
+- parser-derived `SLOC` exclusions in `languages/<language>/parser.rs`,
+- clone fingerprint normalization in `languages/base.rs` and duplicate grouping in `clones.rs`,
+- cyclomatic and cognitive complexity node sets in `languages/<language>/parser.rs`,
 - sorted and compensated mass summation in `analyze.rs`,
-- structural rule span selection and filtering in `rules.rs`, `directives.rs`, and `analyze.rs`,
+- structural rule span selection and filtering in `rules/`, `directives.rs`, and `analyze.rs`,
 - verbosity union logic in `analyze.rs`.
 
 ## Extension points
 
 - Extra `ast-grep` rules: set `SCB_CHECK_EXTRA_SLOP_RULES` to a `:`-separated list of YAML files.
-- Structural rules: add a Rust rule in `rules.rs`, register it in the structural registry, and keep it on shared facts plus `RuleContext`.
+- Structural rules: add a Rust rule file in `rules/`, register it in the structural registry, and keep it on shared facts.
 - New public CLI commands: add them to `crates/scb-check`; do not add command logic to the Python shim.

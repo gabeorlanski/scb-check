@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+use crate::languages::CommentSpan;
 use crate::model::{AstGrepFinding, Function, StructuralFinding};
-use crate::parser::CommentSpan;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct IgnoreDirective {

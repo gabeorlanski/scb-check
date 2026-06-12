@@ -10,11 +10,11 @@ use crate::directives::{
     filter_structural_findings, parse_source_directives,
 };
 use crate::facts::{build_function, function_lines};
+use crate::languages::parse_syntax;
 use crate::model::{
     AstGrepFinding, Function, Language, LanguageSyntaxSummary, Report, SourceFile, SourceLines,
     StructuralFinding,
 };
-use crate::parser::parse_syntax;
 use crate::rules::{run_structural_rules, structural_rule_ids};
 
 #[derive(Debug, Clone)]

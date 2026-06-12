@@ -37,16 +37,16 @@ Implemented analysis paths:
 | --- | --- |
 | Public CLI command or option | `crates/scb-check/src/` |
 | Config loading or path walking | `crates/scb-check/src/config.rs`, `crates/scb-check/src/walk.rs` |
-| Source parsing, `SLOC`, directives, shared facts | `crates/scb-check/src/parser.rs`, `crates/scb-check/src/directives.rs`, `crates/scb-check/src/analyze.rs` |
+| Source parsing, `SLOC`, directives, shared facts | `crates/scb-check/src/languages/<language>/parser.rs`, `crates/scb-check/src/languages/base.rs`, `crates/scb-check/src/facts.rs`, `crates/scb-check/src/directives.rs`, `crates/scb-check/src/analyze.rs` |
 | Clone detection | `crates/scb-check/src/clones.rs` |
-| `ast-grep` integration | `crates/scb-check/src/astgrep.rs` and `crates/scb-check/resources/slop_rules/` |
-| Structural rule behavior | `crates/scb-check/src/rules.rs` |
+| `ast-grep` integration | `crates/scb-check/src/astgrep.rs` and `crates/scb-check/src/languages/python/ast_grep_rules/` |
+| Structural rule behavior | `crates/scb-check/src/rules/` |
 | JSON scores or human rendering | `crates/scb-check/src/analyze.rs`, `crates/scb-check/src/render.rs` |
 | Shared analysis/reporting records | `crates/scb-check/src/model.rs` |
 
 ## Adding an `ast-grep` rule
 
-1. Add or update YAML under `crates/scb-check/resources/slop_rules/`.
+1. Add or update YAML under the owning language, currently `crates/scb-check/src/languages/python/ast_grep_rules/`.
 2. Use a unique rule ID across both `ast-grep` and structural rules.
 3. Set severity and any `min_file_count` metadata deliberately.
 4. Add behavioral Rust CLI tests that exercise in-process ast-grep matching, severity filtering, count thresholds, directive filtering, and report fields.
@@ -54,18 +54,18 @@ Implemented analysis paths:
 
 ## Adding a structural rule
 
-1. Add a Rust rule under `crates/scb-check/src/rules.rs`.
-2. Keep rule metadata immutable: `id`, `severity`, `languages`, `target`, and `description`.
-3. Operate on shared function/project facts plus `RuleContext`; do not inspect language-native tree-sitter nodes.
-4. Register the rule in the Rust structural registry.
+1. Add a Rust rule file under `crates/scb-check/src/rules/` using the rule ID as the filename.
+2. Keep rule metadata immutable: `id`, `severity`, `target`, and `message`.
+3. Operate on shared function/project facts; do not inspect language-native tree-sitter nodes.
+4. Register the rule in `crates/scb-check/src/rules/mod.rs`.
 5. Ensure the rule ID does not collide with bundled `ast-grep` rule IDs.
 6. Test observable findings, ignore behavior, report fields, and rendering prefixes.
 
 ## Adding a language
 
 1. Add the tree-sitter grammar dependency.
-2. Add a `Language` enum value, parser dispatch, suffix mapping, and discovery coverage in Rust.
-3. Add parser lowering for SLOC, functions, complexity, clone fingerprints, comments, and any structural-rule facts the language can provide.
+2. Add a `Language` enum value, parser dispatch in `languages/mod.rs`, suffix mapping, and discovery coverage in Rust.
+3. Add parser lowering in `languages/<language>/parser.rs` for SLOC, functions, complexity, clone fingerprints, comments, and any structural-rule facts the language can provide.
 4. Add behavioral parser, clone, and pipeline tests.
 5. Document whether ast-grep rules, directives, and structural rules apply to the language.
 
