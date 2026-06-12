@@ -37,7 +37,7 @@ Implemented analysis paths:
 | --- | --- |
 | Public CLI command or option | `crates/scb-check/src/` |
 | Config loading or path walking | `crates/scb-check/src/config.rs`, `crates/scb-check/src/walk.rs` |
-| Source parsing, `SLOC`, directives, shared facts | `crates/scb-check/src/languages/<language>/parser.rs`, `crates/scb-check/src/languages/base.rs`, `crates/scb-check/src/facts.rs`, `crates/scb-check/src/directives.rs`, `crates/scb-check/src/analyze.rs` |
+| Source parsing, `SLOC`, directives, shared facts | `crates/scb-check/src/languages/mod.rs`, `crates/scb-check/src/languages/<language>/parser.rs`, `crates/scb-check/src/facts.rs`, `crates/scb-check/src/directives.rs`, `crates/scb-check/src/analyze.rs` |
 | Clone detection | `crates/scb-check/src/clones.rs` |
 | `ast-grep` integration | `crates/scb-check/src/astgrep.rs` and `crates/scb-check/src/languages/python/ast_grep_rules/` |
 | Structural rule behavior | `crates/scb-check/src/rules/` |

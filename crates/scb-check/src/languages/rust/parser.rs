@@ -1,113 +1,122 @@
+use std::collections::BTreeSet;
+
 use tree_sitter::Node;
 
-use crate::languages::base::{
-    ParsedSyntax, collect_comments, collect_functions, count_nodes, function_span,
-    generic_sloc_lines, parse_tree,
-};
+use crate::languages::{BaseParser, CommentSpan, FunctionSpan, LanguageParser};
 
-pub(crate) fn parse_syntax(source: &str) -> Result<ParsedSyntax, String> {
-    let language = tree_sitter_rust::LANGUAGE.into();
-    let tree = parse_tree(&language, "rust", source)?;
-    let root = tree.root_node();
-    let mut functions = Vec::new();
-    collect_functions(source, root, &mut functions, is_function, build_function);
-    let mut comments = Vec::new();
-    collect_comments(source, root, &mut comments, is_comment);
-    let sloc_lines = generic_sloc_lines(source, &comments);
-    Ok(ParsedSyntax {
-        functions,
-        comments,
-        sloc_lines,
-        node_count: count_nodes(root),
-    })
-}
+pub(crate) static RUST_PARSER: RustLanguageParser = RustLanguageParser;
 
-fn is_function(kind: &str) -> bool {
-    kind == "function_item"
-}
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct RustLanguageParser;
 
-fn build_function(source: &str, node: Node<'_>) -> crate::languages::FunctionSpan {
-    function_span(
-        source,
-        node,
-        1 + cyclomatic_increment(node),
-        node.children(&mut node.walk())
-            .map(|child| cognitive_for_node(child, 0))
-            .sum(),
-        max_nesting_for_node(node),
-    )
-}
-
-fn is_comment(kind: &str) -> bool {
-    matches!(kind, "line_comment" | "block_comment")
-}
-
-fn cyclomatic_increment(node: Node<'_>) -> usize {
-    let mut total = usize::from(is_complexity_node(node) || is_boolean_operation(node));
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        total += cyclomatic_increment(child);
+impl LanguageParser for RustLanguageParser {
+    fn label(&self) -> &'static str {
+        "rust"
     }
-    total
+
+    fn tree_sitter_language(&self) -> tree_sitter::Language {
+        tree_sitter_rust::LANGUAGE.into()
+    }
+
+    fn is_function_node(&self, kind: &str) -> bool {
+        kind == "function_item"
+    }
+
+    fn is_comment_node(&self, kind: &str) -> bool {
+        matches!(kind, "line_comment" | "block_comment")
+    }
+
+    fn build_function(&self, source: &str, node: Node<'_>) -> FunctionSpan {
+        BaseParser::function_span(
+            source,
+            node,
+            1 + Self::cyclomatic_increment(node),
+            node.children(&mut node.walk())
+                .map(|child| Self::cognitive_for_node(child, 0))
+                .sum(),
+            Self::max_nesting_for_node(node),
+        )
+    }
+
+    fn sloc_lines(
+        &self,
+        source: &str,
+        _root: Node<'_>,
+        comments: &[CommentSpan],
+    ) -> BTreeSet<usize> {
+        BaseParser::generic_sloc_lines(source, comments)
+    }
 }
 
-fn cognitive_for_node(node: Node<'_>, nesting: usize) -> usize {
-    let child_score: usize = node
-        .children(&mut node.walk())
-        .map(|child| cognitive_for_node(child, nesting))
-        .sum();
-    if is_boolean_operation(node) {
-        return 1 + child_score;
+impl RustLanguageParser {
+    fn cyclomatic_increment(node: Node<'_>) -> usize {
+        let mut total =
+            usize::from(Self::is_complexity_node(node) || Self::is_boolean_operation(node));
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            total += Self::cyclomatic_increment(child);
+        }
+        total
     }
-    if matches!(node.kind(), "break_expression" | "continue_expression") {
-        return 1;
-    }
-    if is_complexity_node(node) {
-        let nested_score: usize = node
+
+    fn cognitive_for_node(node: Node<'_>, nesting: usize) -> usize {
+        let child_score: usize = node
             .children(&mut node.walk())
-            .map(|child| cognitive_for_node(child, nesting + 1))
+            .map(|child| Self::cognitive_for_node(child, nesting))
             .sum();
-        return 1 + nesting + nested_score;
+        if Self::is_boolean_operation(node) {
+            return 1 + child_score;
+        }
+        if matches!(node.kind(), "break_expression" | "continue_expression") {
+            return 1;
+        }
+        if Self::is_complexity_node(node) {
+            let nested_score: usize = node
+                .children(&mut node.walk())
+                .map(|child| Self::cognitive_for_node(child, nesting + 1))
+                .sum();
+            return 1 + nesting + nested_score;
+        }
+        child_score
     }
-    child_score
-}
 
-fn max_nesting_for_node(node: Node<'_>) -> usize {
-    let mut max_nesting = 0;
-    let mut stack = vec![(node, 0)];
-    while let Some((current, nesting)) = stack.pop() {
-        max_nesting = max_nesting.max(nesting);
-        let child_nesting = if is_complexity_node(current) {
-            nesting + 1
-        } else {
-            nesting
-        };
-        let mut cursor = current.walk();
-        stack.extend(
-            current
-                .children(&mut cursor)
-                .map(|child| (child, child_nesting)),
-        );
+    fn max_nesting_for_node(node: Node<'_>) -> usize {
+        let mut max_nesting = 0;
+        let mut stack = vec![(node, 0)];
+        while let Some((current, nesting)) = stack.pop() {
+            max_nesting = max_nesting.max(nesting);
+            let child_nesting = if Self::is_complexity_node(current) {
+                nesting + 1
+            } else {
+                nesting
+            };
+            let mut cursor = current.walk();
+            stack.extend(
+                current
+                    .children(&mut cursor)
+                    .map(|child| (child, child_nesting)),
+            );
+        }
+        max_nesting
     }
-    max_nesting
-}
 
-fn is_complexity_node(node: Node<'_>) -> bool {
-    matches!(
-        node.kind(),
-        "if_expression"
-            | "match_expression"
-            | "for_expression"
-            | "loop_expression"
-            | "while_expression"
-    )
-}
-
-fn is_boolean_operation(node: Node<'_>) -> bool {
-    if node.kind() != "binary_expression" {
-        return false;
+    fn is_complexity_node(node: Node<'_>) -> bool {
+        matches!(
+            node.kind(),
+            "if_expression"
+                | "match_expression"
+                | "for_expression"
+                | "loop_expression"
+                | "while_expression"
+        )
     }
-    let mut cursor = node.walk();
-    node.children(&mut cursor)
-        .any(|child| matches!(child.kind(), "&&" | "||"))
+
+    fn is_boolean_operation(node: Node<'_>) -> bool {
+        if node.kind() != "binary_expression" {
+            return false;
+        }
+        let mut cursor = node.walk();
+        node.children(&mut cursor)
+            .any(|child| matches!(child.kind(), "&&" | "||"))
+    }
 }

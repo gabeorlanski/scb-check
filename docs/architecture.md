@@ -101,7 +101,7 @@ CLI (`crates/scb-check`, via `src/scb_check/cli.py` package shim)
 Change these only with tests and documentation updates because they move user-visible scores:
 
 - parser-derived `SLOC` exclusions in `languages/<language>/parser.rs`,
-- clone fingerprint normalization in `languages/base.rs` and duplicate grouping in `clones.rs`,
+- clone fingerprint normalization in `languages/mod.rs` and duplicate grouping in `clones.rs`,
 - cyclomatic and cognitive complexity node sets in `languages/<language>/parser.rs`,
 - sorted and compensated mass summation in `analyze.rs`,
 - structural rule span selection and filtering in `rules/`, `directives.rs`, and `analyze.rs`,
