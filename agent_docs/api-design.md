@@ -1,26 +1,30 @@
 # API Design & Interfaces
 
-> Rules for designing public APIs, managing visibility, backward compatibility, and CLI-facing contracts
+> Rules for public CLI contracts, Rust module boundaries, config, and shared model design.
 
-**When to check**: When designing or modifying public APIs, CLI options, command behavior, dataclasses, or module boundaries
+**When to check**: When designing or modifying CLI options, command behavior, JSON fields, config, source directives, shared records, or module boundaries.
 
 ## Rules
 
 <!-- rule:1 -->
-- Prefix implementation details with underscore (`_`) and exclude them from stable entrypoints — Prevents accidental API surface expansion and signals internal-only usage.
+- Keep implementation details module-private unless another module has a real use case. Expose the smallest API that supports current callers.
 <!-- rule:2 -->
-- Prefer instance methods when accessing `self` attributes or enabling polymorphism; use module-level functions when no instance state is needed — Reduces unnecessary coupling and parameter passing.
+- Prefer free functions for stateless transforms and small structs for shared state. Add traits only when multiple real implementations need the same interface.
 <!-- rule:3 -->
-- Return new collections from transform functions instead of mutating inputs — Prevents surprising side effects and makes code easier to reason about. Exceptions must be performance-critical or clearly named `update_*`/`*_inplace`.
+- Make ownership explicit. Return owned data at durable boundaries, borrow for read-only analysis, and consume values when a stage naturally takes ownership.
 <!-- rule:4 -->
-- Don't access or modify private attributes (`_prefixed`) from outside their module/class — Use public APIs, properties, constructor parameters, or move shared logic to an appropriate layer.
+- Do not reach across module boundaries to manipulate another module's private representation. Move shared behavior to an appropriate public function or type.
 <!-- rule:5 -->
-- Keep command modules as boundary code — Parse Typer arguments/options, call config/walker/pipeline/reporting modules, and map expected failures to exit codes.
+- Keep CLI modules as boundary code. `args.rs` parses and normalizes command-line input; `lib.rs` dispatches and maps expected failures to exit codes.
 <!-- rule:6 -->
-- Preserve CLI contracts unless a change explicitly calls for migration — Command names, option names, JSON field names, and exit codes are user-facing API.
+- Preserve public contracts unless a change explicitly includes migration: command names, option names, JSON field names, config keys, source directives, rule IDs, and exit codes.
 <!-- rule:7 -->
-- Keep scoring-sensitive invariants centralized — Verbosity is a union over SLOC lines, erosion is high-complexity mass share, and both belong in reporting/pipeline logic rather than CLI wiring.
+- Keep scoring-sensitive invariants centralized. `verbosity` is a union over `SLOC` lines; `erosion` and `cog_erosion` are high-complexity mass shares.
 <!-- rule:8 -->
-- Sparingly define new exception types. If you must keep them broad and ensure they are not just wrappers with pass.
+- Prefer typed error enums inside Rust modules. Convert to formatted user-facing strings at the CLI boundary.
 <!-- rule:9 -->
-- Minimize use of `tuple` in design. In simple cases it is fine but in large cases a dedicated data structure is preferred.
+- Replace large tuples with named structs when values cross function or module boundaries.
+<!-- rule:1218 -->
+- Use serde structs for known config shapes where practical, including defaults and unknown-field rejection. Keep manual TOML traversal only for format discovery or compatibility behavior.
+<!-- rule:1219 -->
+- Keep Python packaging APIs isolated to `hatch_build.py` and `pyproject.toml`; do not let packaging constraints leak into Rust core design.

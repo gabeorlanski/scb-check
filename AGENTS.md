@@ -1,6 +1,8 @@
 # AGENTS.md
 
-`scb-check` is a Python CLI that reports **verbosity** (clone + slop-pattern LOC share) and **erosion** (high-complexity function mass share) for supported source codebases. Entrypoint: `scb-check check PATH` → [`src/scb_check/cli.py`](src/scb_check/cli.py).
+`scb-check` is a Rust CLI that reports **verbosity** (clone + slop-pattern + structural-rule `SLOC` share) and **erosion** (high-complexity function mass share) for supported source codebases. Entrypoint: `scb-check check PATH` -> [crates/scb-check/src/main.rs](crates/scb-check/src/main.rs), with command orchestration in [crates/scb-check/src/lib.rs](crates/scb-check/src/lib.rs).
+
+Python packaging remains only as a wheel delivery mechanism for the compiled Rust binary. The build hook is [hatch_build.py](hatch_build.py); do not reintroduce a Python runtime shim.
 
 See [README.md](README.md) for user-facing usage.
 
@@ -10,60 +12,76 @@ See [docs/index.md](docs/index.md) for maintainer guides:
 - [Tree walking](docs/tree-walking.md): how source becomes IR, directives, semantic context, and rule inputs.
 - [Development](docs/development.md): current implementation status and common change approaches.
 
-Keep these docs up to date. When behavior, scoring, CLI contracts, source directives, tree walking, structural rules, reporting, or extension points change, update the relevant guide in the same commit.
+Keep these docs up to date. When behavior, scoring, CLI contracts, source directives, tree walking, structural rules, reporting, packaging, or extension points change, update the relevant guide in the same commit.
 
-## Gotchas (read first)
+## Gotchas
 
-- **`ty` is the type checker, not mypy.** Run `uv run ty check .`.
-- **ast-grep subprocess**: `run_sg` tries a global `sg` binary first, then falls back to package-managed ast-grep executables next to Python if global `sg` is missing or fails. Tests monkeypatch `scb_check.pipeline.run_sg` (where it's imported) to avoid this — follow that pattern instead of invoking `sg` in tests. Python ast-grep rules run only on Python files.
-- **Verbosity is a union**, not a sum. Clone lines ∪ ast-grep lines per file, intersected with SLOC lines. Don't double-count. Non-Python languages currently contribute clone LOC only.
-- **Dataclasses are `frozen=True, slots=True`** (see [`src/scb_check/models.py`](src/scb_check/models.py)). Pass tuples across module boundaries, not lists.
+- **Rust owns runtime behavior.** The main crate lives at [crates/scb-check](crates/scb-check). Prefer Rust tests and Rust docs for behavior changes.
+- **Python packaging is delivery-only.** `pyproject.toml`, `uv.lock`, and `hatch_build.py` exist to build and package the Rust binary for `uvx`.
+- **ast-grep runs in process.** Bundled Python ast-grep rules are loaded through Rust ast-grep crates; no external `sg` executable is required for the Rust path.
+- **Verbosity is a union**, not a sum. Clone lines union ast-grep lines union structural-rule lines per file, intersected with `SLOC` lines. Do not double-count.
+- **Rust and Python source are both parsed by tree-sitter.** Python ast-grep rules currently apply only to Python files; shared structural rules run over lowered Python/Rust facts.
+- **Avoid Pythonic ports in core logic.** Do not string-scan syntax that tree-sitter can provide, do not model control flow with stringly typed errors, and do not clone owned records just to mimic Python list/dict pipelines.
 
-## Workflow (every change)
+## Workflow
 
-1. Write **behavioral** tests — assert observable behavior, not rendering strings or call order.
-2. Implement the changes.
-3. Follow the workflow:
+Every behavior change should start with behavioral tests that assert observable behavior: scores, exit codes, report fields, source discovery, directives, or rendered prefixes.
+
+Run the Rust workflow after Rust changes:
+
 ```bash
-uv run ruff check --fix .
-uv run ty check .
-uv run pytest
-uv run scb-check check .            # ty/ruff like reporting
+cargo fmt --check
+cargo test --all --all-features
+cargo clippy --all --all-targets --all-features -- -D warnings
+cargo run -p scb-check -- check .
+```
+
+Run the Python packaging workflow after packaging or build-hook changes:
+
+```bash
+uv run ruff check hatch_build.py
+uv run ty check hatch_build.py
 uv run vulture
 ```
 
-4. Update affected documentation and AGENTS.md files. Keep README and `docs/` synchronized with current behavior and approaches.
-
-Single test: `uv run pytest tests/test_cli.py::test_name`.
+When dependency files change, keep the appropriate lockfile synchronized: `Cargo.lock` for Rust dependencies and `uv.lock` for Python packaging/dev dependencies.
 
 ## Layout
 
-The package splits into three layers. Before editing in one, read its `AGENTS.md` — those rules win over anything inferred from surrounding code.
+The Rust crate is split into boundary, analysis, language, rule, and reporting modules:
 
-- [`src/scb_check/`](src/scb_check/AGENTS.md): Main module for the codebase.
-- [`src/scb_check/analysis/`](src/scb_check/analysis/AGENTS.md): source → findings (parse, loc, clones, symbols, astgrep)
-- [`src/scb_check/reporting/`](src/scb_check/reporting/AGENTS.md): findings → output (score, render)
-- [`src/scb_check/commands`](src/scb_check/commands/AGENTS.md): the command implementations for the CLI.
-- [`docs/`](docs/AGENTS.md): maintainer guides for architecture, tree walking, development status, and change approaches.
+- [crates/scb-check/src/main.rs](crates/scb-check/src/main.rs): binary entrypoint.
+- [crates/scb-check/src/lib.rs](crates/scb-check/src/lib.rs): CLI orchestration, exit-code mapping, command dispatch.
+- [crates/scb-check/src/args.rs](crates/scb-check/src/args.rs): `clap` parsing and CLI option normalization.
+- [crates/scb-check/src/config.rs](crates/scb-check/src/config.rs): config discovery and TOML loading.
+- [crates/scb-check/src/walk.rs](crates/scb-check/src/walk.rs): source discovery.
+- [crates/scb-check/src/analyze.rs](crates/scb-check/src/analyze.rs): report assembly and scoring-sensitive line accounting.
+- [crates/scb-check/src/languages/](crates/scb-check/src/languages): tree-sitter parsing, SLOC, complexity, comments, function facts, call facts, and clone fingerprints.
+- [crates/scb-check/src/astgrep.rs](crates/scb-check/src/astgrep.rs): bundled and extra ast-grep rule loading/running.
+- [crates/scb-check/src/directives.rs](crates/scb-check/src/directives.rs): `scbc` source directives and suppression behavior.
+- [crates/scb-check/src/clones.rs](crates/scb-check/src/clones.rs): duplicate-structure detection.
+- [crates/scb-check/src/rules/](crates/scb-check/src/rules): structural rules over lowered facts.
+- [crates/scb-check/src/render.rs](crates/scb-check/src/render.rs): JSON and human-readable output.
+- [crates/scb-check/src/model.rs](crates/scb-check/src/model.rs): shared analysis/reporting records.
 
-- Top level (boundaries): [`cli.py`](src/scb_check/cli.py), [`pipeline.py`](src/scb_check/pipeline.py), [`config.py`](src/scb_check/config.py), [`walker.py`](src/scb_check/walker.py), [`logging.py`](src/scb_check/logging.py); shared dataclasses in [`models.py`](src/scb_check/models.py).
+Tests are currently colocated with Rust modules. Keep new tests close to the behavior they cover unless an integration test is clearly a better fit.
 
-Tests mirror this layout: [`tests/analysis/`](tests/analysis/), [`tests/reporting/`](tests/reporting/), and boundary tests at `tests/` root.
+## Rust Design Expectations
 
-# Philosophy
+- Boundaries handle coercion and normalization. Core analysis should consume already-validated, strongly typed values.
+- Prefer typed errors internally; convert to user-facing strings and exit codes at the CLI boundary.
+- Prefer tree-sitter node facts over ad hoc source string parsing.
+- Move owned values through pipeline stages where possible. Borrow when reading, clone only when ownership must be duplicated.
+- Use enums/newtypes for closed sets such as severities, languages, output formats, and rule identifiers when behavior depends on those values.
+- Keep scoring-sensitive invariants centralized in analysis/reporting code.
+- Composition over inheritance-style abstractions. Add traits only when multiple real implementations need the same interface.
+- Never abstract before two real use cases exist.
+- No dead code. Version control keeps history.
 
-Pydantic AI is meant to be a light-weight library that any Python developer who wants to work with LLMs and agents (whether simple or complex) should feel no hesitation to pull into their project. It's not meant to be everything to everyone, but it should enable people to build just about anything.
+## agent_docs
 
-As such, we prefer strong primitives, powerful abstractions, and general solutions and extension points that enable people to build things that we hadn't even thought of, over narrow solutions for specific use cases, opinionated solutions that push a particular approach to agent design that hasn't yet stood the test of time, or generally "every single possible battery included" solutions that make the library unnecessarily bloated.
+When generating or reviewing code anywhere in this repo, always read [agent_docs/index.md](agent_docs/index.md) and follow/enforce those guidelines. Read the linked topic guides when the work touches their area:
 
-# Coding Guidelines
-
-When generating or reviewing code anywhere in this repo, always read [agent_docs/index.md](agent_docs/index.md) and follow/enforce those guidelines. Don't forget to read the linked "topic guides" when appropriate.
-
-Additionally, always read the directory-specific instructions when working in those directories:
-
-- [docs/AGENTS.md](docs/AGENTS.md)
-- [pydantic_ai_slim/pydantic_ai/AGENTS.md](pydantic_ai_slim/pydantic_ai/AGENTS.md)
-- [pydantic_ai_slim/pydantic_ai/builtin_tools/AGENTS.md](pydantic_ai_slim/pydantic_ai/builtin_tools/AGENTS.md)
-- [pydantic_ai_slim/pydantic_ai/models/AGENTS.md](pydantic_ai_slim/pydantic_ai/models/AGENTS.md)
-- [tests/AGENTS.md](tests/AGENTS.md)
+- [agent_docs/code-simplification.md](agent_docs/code-simplification.md)
+- [agent_docs/api-design.md](agent_docs/api-design.md)
+- [agent_docs/documentation.md](agent_docs/documentation.md)

@@ -1,34 +1,34 @@
 # Code Simplification & Idioms
 
-> Rules for simplifying code using Python idioms, comprehensions, operators, and eliminating unnecessary complexity
+> Rules for simplifying Rust code and avoiding Python-shaped ports.
 
-**When to check**: When refactoring code for clarity or looking to simplify complex patterns
+**When to check**: When refactoring code for clarity, reducing clone-heavy data flow, or replacing ad hoc parsing.
 
 ## Rules
 
 <!-- rule:255 -->
-- Use list comprehensions instead of for-loop-with-append patterns — More concise, readable, and often faster for transforming/filtering iterables into lists.
+- Prefer iterator adapters when they clarify a straight transform/filter/collect pipeline. Use explicit loops when branching, early exits, or mutation make the loop clearer.
 <!-- rule:85 -->
-- Omit parameters that match default values in function/constructor calls — Reduces noise, prevents maintenance burden when defaults change, and makes non-default configuration more visible.
+- Omit parameters that match default values in constructors/builders when the default is visible and stable.
 <!-- rule:166 -->
-- Eliminate single-use intermediate variables — Reassign or return directly instead of creating `_filtered`, `_copy`, etc., unless the name adds useful meaning.
+- Eliminate single-use intermediate variables unless the name explains domain meaning or makes a scoring step easier to audit.
 <!-- rule:122 -->
-- Flatten nested `if` statements with no intervening code into `if condition1 and condition2:` — Reduces nesting depth without changing logic.
-<!-- rule:-1 -->
-- Use tuple syntax for `isinstance()` checks, not `|` union — Tuple syntax avoids runtime union construction overhead.
-<!-- rule:34 -->
-- Link to official upstream/project docs instead of duplicating exhaustive setup details — Prevents stale documentation and reduces maintenance burden.
+- Use guard clauses and `let else` to flatten error/empty cases before core logic.
+<!-- rule:1216 -->
+- Replace string-prefix/sentinel control flow with typed enums or error variants.
 <!-- rule:519 -->
-- Use dict comprehensions instead of empty dict plus loop — More concise and idiomatic for simple mappings and filtered sequences.
+- Prefer structured parsing and typed records over `Map<String, Value>` traversal when the shape is known.
 <!-- rule:330 -->
-- Use `any()` instead of for-loops with boolean flags when checking if any element matches a condition — Eliminates manual flag management and break statements.
+- Use `.any()`, `.all()`, `.find()`, and `.position()` instead of manual boolean flags.
 <!-- rule:677 -->
-- Use `@cached_property` for expensive computed attributes — Defers computation until first access and caches the result.
+- Cache or reuse expensive parser/rule/glob setup when it is independent of the current file.
 <!-- rule:3 -->
-- Use `x or default` for fallback values instead of verbose if-else blocks — Avoid this when falsy values (`0`, `''`, `[]`, `None`) are semantically valid and should not trigger the default.
+- Prefer `unwrap_or`, `unwrap_or_default`, and `unwrap_or_else` for simple fallback values. Do not hide meaningful error handling behind defaults.
 <!-- rule:661 -->
-- Remove redundant null/None checks for guaranteed-present values — Simplifies code and makes type invariants clearer.
+- Remove redundant `Option` checks after boundary validation has guaranteed presence.
 <!-- rule:1211 -->
-- Prefer set operations for line accounting — SLOC intersections and clone/ast-grep unions should be expressed directly as set operations to avoid double-counting bugs.
+- Prefer set operations for line accounting. `SLOC` intersections and clone/ast-grep/structural unions should be direct and auditable.
 <!-- rule:1212 -->
-- Reuse module-level singletons for expensive parser/tool setup — Do not rebuild tree-sitter parsers, compiled regexes, or static rule metadata inside hot loops.
+- Use tree-sitter nodes for syntax-derived facts instead of splitting signatures, scanning lines, or matching source text.
+<!-- rule:1217 -->
+- Move owned vectors and records between pipeline stages when possible. Avoid cloning whole fact collections just to preserve Python-style append/aggregate flow.
