@@ -68,6 +68,10 @@ enum ParseFileError {
     Parse(String),
 }
 
+/// Analyze discovered source files into one score-bearing report.
+///
+/// The inputs are borrowed because discovery owns the durable file list while analysis only reads
+/// it; the returned `Report` owns its findings and source lines for later rendering.
 pub fn analyze(
     files: &[SourceFile],
     disable_sg: bool,

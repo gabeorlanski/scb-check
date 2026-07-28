@@ -23,6 +23,7 @@ impl Violation for TrivialWrapper {
     }
 }
 
+/// Append findings for helpers that only delegate to another call or return a constant.
 pub fn check(context: &RuleContext<'_>, findings: &mut Vec<StructuralFinding>) {
     findings.extend(context.functions.iter().filter_map(trivial_wrapper));
 }

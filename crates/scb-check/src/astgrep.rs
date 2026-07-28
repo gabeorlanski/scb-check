@@ -63,6 +63,10 @@ pub struct AstGrepCatalog {
 }
 
 impl AstGrepCatalog {
+    /// Load the bundled rules together with rules configured through the environment.
+    ///
+    /// The catalog owns parsed rules and their source documents so analysis can borrow one stable
+    /// collection for every file instead of reparsing rule YAML in the per-file loop.
     pub fn load() -> Result<Self, String> {
         Self::from_texts(bundled_and_extra_rule_texts()?)
     }
@@ -84,6 +88,7 @@ impl AstGrepCatalog {
         Ok(Self { rules, documents })
     }
 
+    /// Return loaded ast-grep rule identifiers in catalog order.
     pub fn rule_ids(&self) -> Vec<String> {
         self.documents
             .iter()
@@ -91,6 +96,7 @@ impl AstGrepCatalog {
             .collect()
     }
 
+    /// Return configured per-rule file-count thresholds.
     pub fn thresholds(&self) -> BTreeMap<String, usize> {
         self.documents
             .iter()
@@ -102,6 +108,7 @@ impl AstGrepCatalog {
             .collect()
     }
 
+    /// Return the YAML document for one loaded rule, if present.
     pub fn rule_document(&self, rule_id: &str) -> Option<String> {
         self.documents
             .iter()
@@ -109,6 +116,7 @@ impl AstGrepCatalog {
             .map(|document| document.yaml.clone())
     }
 
+    /// Run applicable ast-grep rules against one source file and return sorted, deduplicated findings.
     pub fn run_rules(
         &self,
         language: SupportLang,
@@ -166,6 +174,7 @@ impl AstGrepCatalog {
     }
 }
 
+/// Load and return the YAML document for an ast-grep rule identifier.
 pub fn ast_grep_rule_document(rule_id: &str) -> Result<Option<String>, String> {
     Ok(AstGrepCatalog::load()?.rule_document(rule_id))
 }

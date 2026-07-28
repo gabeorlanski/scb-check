@@ -11,6 +11,7 @@ pub enum Language {
 }
 
 impl Language {
+    /// Return the stable lowercase label used in reports and diagnostics.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Python => "python",
@@ -77,18 +78,25 @@ pub struct Function {
 }
 
 impl Function {
+    /// Compute this function's cyclomatic-complexity mass.
+    ///
+    /// Mass weights complexity by the square root of SLOC so erosion reflects both difficult and
+    /// consequential functions without making long functions dominate linearly.
     pub fn cc_mass(&self) -> f64 {
         usize_to_f64(self.cyclomatic) * usize_to_f64(self.sloc).sqrt()
     }
 
+    /// Compute this function's cognitive-complexity mass using the same SLOC weighting.
     pub fn cog_mass(&self) -> f64 {
         usize_to_f64(self.cognitive) * usize_to_f64(self.sloc).sqrt()
     }
 
+    /// Report whether cyclomatic complexity exceeds the fixed high-complexity threshold.
     pub const fn is_high_cc(&self) -> bool {
         self.cyclomatic > 10
     }
 
+    /// Report whether cognitive complexity exceeds the fixed high-complexity threshold.
     pub const fn is_high_cog(&self) -> bool {
         self.cognitive > 10
     }
@@ -123,6 +131,10 @@ pub struct CallGraph {
 }
 
 impl CallGraph {
+    /// Build a call graph from resolved call targets in the provided functions.
+    ///
+    /// The graph copies function identifiers only for its lookup index; callers retain ownership
+    /// of the function records so the graph can return references into that canonical slice.
     pub fn from_functions(functions: &[Function]) -> Self {
         let mut graph = DiGraph::new();
         let nodes_by_function: BTreeMap<FunctionId, NodeIndex> = functions
@@ -155,6 +167,10 @@ impl CallGraph {
         }
     }
 
+    /// Return resolved incoming calls to `target` borrowed from the supplied function slice.
+    ///
+    /// The graph stores indices rather than cloned functions, which keeps it compact and ensures
+    /// callers observe the same canonical function and call records used for analysis.
     pub fn incoming_to<'functions>(
         &self,
         functions: &'functions [Function],
@@ -271,6 +287,10 @@ pub struct Report {
 }
 
 impl Report {
+    /// Return the fraction of SLOC flagged by any verbosity detector.
+    ///
+    /// Verbosity uses the union of flagged lines, preventing overlapping detectors from counting
+    /// the same source line more than once.
     pub fn verbosity(&self) -> f64 {
         ratio(
             usize_to_f64(self.verbosity_flagged_loc),
@@ -278,18 +298,22 @@ impl Report {
         )
     }
 
+    /// Return the high cyclomatic-complexity mass share.
     pub fn erosion(&self) -> f64 {
         ratio(self.high_cc_mass, self.total_mass)
     }
 
+    /// Return the high cognitive-complexity mass share.
     pub fn cog_erosion(&self) -> f64 {
         ratio(self.high_cog_mass, self.total_cog_mass)
     }
 
+    /// Return the total number of parsed syntax trees across supported languages.
     pub fn syntax_tree_count(&self) -> usize {
         self.syntax_count(|summary| summary.tree_count)
     }
 
+    /// Return the total number of parsed syntax nodes across supported languages.
     pub fn syntax_node_count(&self) -> usize {
         self.syntax_count(|summary| summary.node_count)
     }
@@ -298,6 +322,7 @@ impl Report {
         self.syntax_by_language.iter().map(count).sum()
     }
 
+    /// Report whether the analysis contains any reportable verbosity or erosion finding.
     pub const fn has_findings(&self) -> bool {
         self.clone_loc > 0
             || !self.clones.is_empty()

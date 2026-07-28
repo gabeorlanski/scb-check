@@ -51,15 +51,27 @@ pub struct ParsedSyntax {
 }
 
 pub trait LanguageParser {
+    /// Return the language lowered by this adapter.
     fn language(&self) -> Language;
+    /// Return the human-readable parser label used in diagnostics.
     fn label(&self) -> &'static str;
+    /// Return the tree-sitter grammar used to parse this language.
     fn tree_sitter_language(&self) -> tree_sitter::Language;
+    /// Report whether a tree-sitter node kind represents a function.
     fn is_function_node(&self, kind: &str) -> bool;
+    /// Report whether a tree-sitter node kind represents a comment.
     fn is_comment_node(&self, kind: &str) -> bool;
+    /// Lower one parsed function node into its language-agnostic span.
     fn build_function(&self, source: &str, node: Node<'_>) -> FunctionSpan;
+    /// Extract import bindings that may resolve calls across files.
     fn import_bindings(&self, path: &Path, source: &str, root: Node<'_>) -> Vec<ImportBinding>;
+    /// Return the source lines that count as SLOC for this grammar.
     fn sloc_lines(&self, source: &str, root: Node<'_>, comments: &[CommentSpan])
     -> BTreeSet<usize>;
+    /// Lower a syntax span into the shared function model.
+    ///
+    /// The default borrows parser facts while constructing an owned `Function`, so later analysis
+    /// can retain it without retaining the parser tree or source buffer.
     fn lower_function(
         &self,
         path: &Path,
@@ -69,8 +81,13 @@ pub trait LanguageParser {
     ) -> Function {
         lower_function_from_span(path, self.language(), span, sloc_lines)
     }
+    /// Return directive text when a comment uses this language's directive syntax.
     fn directive_text<'comment>(&self, comment: &'comment CommentSpan) -> Option<&'comment str>;
 
+    /// Parse and collect language-agnostic syntax facts for one source file.
+    ///
+    /// The returned syntax owns all durable facts so callers can release the borrowed source text
+    /// and tree-sitter tree after parsing.
     fn parse(&self, path: &Path, source: &str) -> Result<ParsedSyntax, String>
     where
         Self: Sized,
@@ -182,6 +199,10 @@ impl BaseParser {
 }
 
 impl BaseParser {
+    /// Construct a language-agnostic function span from adapter-provided semantic and syntax facts.
+    ///
+    /// The result owns the extracted facts because it crosses the parser boundary and must remain
+    /// valid after the borrowed syntax node and source text are released.
     pub fn function_span(
         source: &str,
         node: Node<'_>,
@@ -219,6 +240,7 @@ impl BaseParser {
         }
     }
 
+    /// Return non-comment, non-punctuation source lines using shared SLOC rules.
     pub fn generic_sloc_lines(source: &str, comments: &[CommentSpan]) -> BTreeSet<usize> {
         let source_lines: Vec<&str> = source.lines().collect();
         let comment_intervals = comment_intervals_by_line(comments);
@@ -238,6 +260,7 @@ impl BaseParser {
             .collect()
     }
 
+    /// Report whether a grammar node kind denotes a string literal.
     pub fn is_string_node(kind: &str) -> bool {
         matches!(
             kind,
@@ -245,6 +268,7 @@ impl BaseParser {
         )
     }
 
+    /// Report whether a node's text is a standalone triple-quoted string statement.
     pub fn is_string_statement_text(source: &str, node: Node<'_>) -> bool {
         let text = node.utf8_text(source.as_bytes()).unwrap_or_default().trim();
         (text.starts_with("\"\"\"") && text.ends_with("\"\"\""))
@@ -269,6 +293,10 @@ fn parse_syntax(language: Language, source: &str) -> Result<ParsedSyntax, String
     parse_syntax_at_path(language, Path::new(filename), source)
 }
 
+/// Parse one source file with its language adapter and return language-agnostic syntax facts.
+///
+/// The returned facts own all retained source-derived data, allowing callers to drop the borrowed
+/// source buffer immediately after parsing.
 pub fn parse_syntax_at_path(
     language: Language,
     path: &Path,
@@ -280,6 +308,10 @@ pub fn parse_syntax_at_path(
     }
 }
 
+/// Lower an adapter-specific function span into the shared analysis model.
+///
+/// This dispatches to the language adapter while keeping the returned `Function` owned at the
+/// boundary between parser facts and project-level analysis.
 pub fn lower_function(
     language: Language,
     path: &Path,
@@ -293,6 +325,7 @@ pub fn lower_function(
     }
 }
 
+/// Return the directive payload encoded by a language-specific comment, if any.
 pub fn directive_text(language: Language, comment: &CommentSpan) -> Option<&str> {
     match language {
         Language::Python => python::PYTHON_PARSER.directive_text(comment),
@@ -300,6 +333,7 @@ pub fn directive_text(language: Language, comment: &CommentSpan) -> Option<&str>
     }
 }
 
+/// Return the ast-grep language supported for the given source language.
 pub const fn ast_grep_language(language: Language) -> Option<SupportLang> {
     match language {
         Language::Python => Some(SupportLang::Python),
@@ -307,6 +341,10 @@ pub const fn ast_grep_language(language: Language) -> Option<SupportLang> {
     }
 }
 
+/// Borrow the inclusive source-line slice covered by a function span.
+///
+/// The returned slice is tied to `all_lines` rather than the span because source lines own the
+/// backing storage and must outlive every borrowed line reference.
 pub fn function_lines<'source>(
     span: &FunctionSpan,
     all_lines: &'source [&'source str],
@@ -343,6 +381,10 @@ pub struct FunctionParams {
     pub has_nontrivial: bool,
 }
 
+/// Extract shared syntax facts for one function using language-specific callbacks.
+///
+/// Callbacks isolate grammar differences while this function assembles owned facts that later
+/// analysis can retain independently of the tree-sitter node.
 pub fn function_syntax_facts(
     _source: &str,
     node: Node<'_>,
@@ -418,6 +460,10 @@ fn function_sloc(span: &FunctionSpan, sloc_lines: &BTreeSet<usize>) -> usize {
     sloc_lines.range(span.start_line..=span.end_line).count()
 }
 
+/// Collect call-site facts from a function body without descending into nested functions.
+///
+/// Returned call sites own resolved names because the parsed source and tree nodes are borrowed
+/// only during this traversal.
 pub fn collect_call_sites(
     body: Node<'_>,
     is_function_node: impl Fn(&str) -> bool,
@@ -464,6 +510,7 @@ fn push_children_reverse_with_nesting<'tree>(
     }
 }
 
+/// Return a direct callee name when a node has the expected call and callee kinds.
 pub fn bare_call_name(
     source: &str,
     node: Node<'_>,
@@ -477,6 +524,7 @@ pub fn bare_call_name(
     (function.kind() == callee_kind).then(|| node_text(source, function))
 }
 
+/// Lower a call expression into the simple-return body form when its callee is available.
 pub fn call_body(source: &str, call: Node<'_>, params: &[String]) -> FunctionBody {
     let Some(function) = call.child_by_field_name("function") else {
         return FunctionBody::Complex;
@@ -494,6 +542,7 @@ pub fn call_body(source: &str, call: Node<'_>, params: &[String]) -> FunctionBod
     }))
 }
 
+/// Lower each non-punctuation argument child into the supported simple-expression subset.
 pub fn simple_arguments(source: &str, arguments: Node<'_>, params: &[String]) -> Vec<SimpleExpr> {
     let mut cursor = arguments.walk();
     arguments
@@ -502,6 +551,7 @@ pub fn simple_arguments(source: &str, arguments: Node<'_>, params: &[String]) ->
         .collect()
 }
 
+/// Classify one expression for structural-rule simple-return analysis.
 pub fn simple_expr(source: &str, expression: Node<'_>, params: &[String]) -> SimpleExpr {
     match expression.kind() {
         "identifier" => {
@@ -517,6 +567,10 @@ pub fn simple_expr(source: &str, expression: Node<'_>, params: &[String]) -> Sim
     }
 }
 
+/// Extract ordered identifier segments from a path-like expression.
+///
+/// The returned segments are owned strings because they are derived from a borrowed source buffer
+/// and may be retained for later cross-file call resolution.
 pub fn path_expr(source: &str, expression: Node<'_>) -> Option<Vec<String>> {
     let mut segments = Vec::new();
     let mut stack = vec![expression];
@@ -533,6 +587,9 @@ pub fn path_expr(source: &str, expression: Node<'_>) -> Option<Vec<String>> {
     (!segments.is_empty()).then_some(segments)
 }
 
+/// Copy a tree-sitter node's source text into an owned string.
+///
+/// Ownership is intentional: lowered analysis facts must not borrow the transient parse buffer.
 pub fn node_text(source: &str, node: Node<'_>) -> String {
     node.utf8_text(source.as_bytes())
         .unwrap_or_default()

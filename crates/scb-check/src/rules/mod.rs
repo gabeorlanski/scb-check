@@ -37,10 +37,12 @@ impl Rule {
     }
 }
 
+/// Return identifiers for every bundled structural rule.
 pub fn structural_rule_ids() -> Vec<&'static str> {
     Rule::all().iter().map(|rule| rule.metadata().id).collect()
 }
 
+/// Return the generated document for a structural rule identifier, if it exists.
 pub fn structural_rule_document(rule_id: &str) -> Option<String> {
     let rule = Rule::all()
         .iter()
@@ -48,6 +50,10 @@ pub fn structural_rule_document(rule_id: &str) -> Option<String> {
     Some(base::structural_rule_document(rule.metadata()))
 }
 
+/// Run all structural rules against already lowered project facts.
+///
+/// The function borrows the canonical function and graph collections while returning owned
+/// findings, keeping language parsing separate from rule evaluation and report assembly.
 pub fn run_structural_rules(
     functions: &[Function],
     call_graph: &CallGraph,

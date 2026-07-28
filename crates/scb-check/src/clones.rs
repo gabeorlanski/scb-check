@@ -13,6 +13,10 @@ pub struct CloneCandidate {
     first_lines: Vec<String>,
 }
 
+/// Build a clone candidate for a function with enough structural fingerprint and SLOC evidence.
+///
+/// The candidate owns copied display lines and its group hash because clone detection consumes
+/// candidates after parsed source buffers are no longer needed.
 pub fn function_clone_candidate(
     function: &Function,
     fingerprint: &[String],
@@ -48,6 +52,10 @@ pub fn function_clone_candidate(
     })
 }
 
+/// Group consumed clone candidates by fingerprint hash and return duplicate blocks in source order.
+///
+/// Consuming `candidates` lets this stage move each candidate's owned path and preview lines into
+/// its output instead of cloning them while assembling the report.
 pub fn detect_clones(candidates: Vec<CloneCandidate>) -> Vec<CloneBlock> {
     let mut groups: BTreeMap<String, Vec<CloneCandidate>> = BTreeMap::new();
     for candidate in candidates {

@@ -24,6 +24,9 @@ use rules::structural_rule_document;
 use walk::discover_sources;
 
 /// Run the `scb-check` CLI with already split command-line arguments.
+///
+/// The iterator is consumed at the CLI boundary so argument parsing can own and normalize the
+/// invocation before analysis begins; this avoids borrowing caller-managed argument storage.
 pub fn run_cli<I>(raw_args: I) -> ExitCode
 where
     I: IntoIterator<Item = String>,

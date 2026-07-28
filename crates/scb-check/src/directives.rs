@@ -23,6 +23,10 @@ pub struct ParsedDirectives {
     pub boundaries: Vec<BoundaryDirective>,
 }
 
+/// Parse supported source directives from the comments in one source file.
+///
+/// Parsed directives own their file paths and rule identifiers because filtering occurs later,
+/// after the borrowed source text and comment spans have been discarded.
 pub fn parse_source_directives(
     language: Language,
     path: &Path,
@@ -102,6 +106,9 @@ fn parse_directive_comment(
     Ok(None)
 }
 
+/// Validate boundary directives and apply suppression to ast-grep findings unless `include_all`.
+///
+/// Boundary directives are always validated; `include_all` then returns every finding unchanged.
 pub fn filter_ast_grep_findings(
     findings: Vec<AstGrepFinding>,
     ignores: &[IgnoreDirective],
@@ -120,6 +127,7 @@ pub fn filter_ast_grep_findings(
         .collect())
 }
 
+/// Return structural findings not suppressed by ignore directives.
 pub fn filter_structural_findings(
     findings: Vec<StructuralFinding>,
     ignores: &[IgnoreDirective],

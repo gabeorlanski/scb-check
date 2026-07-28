@@ -33,6 +33,7 @@ impl Violation for LowUseShortFunction {
     }
 }
 
+/// Append low-use short-function findings when the rule is enabled in configuration.
 pub fn check(context: &RuleContext<'_>, findings: &mut Vec<StructuralFinding>) {
     if context.low_use_short_function.enabled {
         findings.extend(

@@ -29,8 +29,10 @@ pub trait Violation {
     const METADATA: RuleMetadata;
     const FIX_AVAILABILITY: FixAvailability = FixAvailability::None;
 
+    /// Render the rule-specific diagnostic message.
     fn message(&self) -> String;
 
+    /// Return a remediation title when this violation can be fixed.
     fn fix_title(&self) -> Option<String> {
         None
     }
@@ -45,6 +47,10 @@ pub struct Diagnostic<V: Violation> {
 }
 
 impl<V: Violation> Diagnostic<V> {
+    /// Construct a structural diagnostic with its source location and subject.
+    ///
+    /// The diagnostic takes ownership of the violation, path, and subject because it represents a
+    /// durable rule result that is converted only after rule evaluation completes.
     pub const fn new(
         violation: V,
         file: PathBuf,
@@ -61,6 +67,10 @@ impl<V: Violation> Diagnostic<V> {
         }
     }
 
+    /// Consume this diagnostic and produce the report-facing structural finding.
+    ///
+    /// This moves the owned location and subject data into the finding while deriving its message
+    /// and optional fix title from the violation before dropping it.
     pub fn into_finding(self) -> StructuralFinding {
         let fix_title = match V::FIX_AVAILABILITY {
             FixAvailability::None => None,
@@ -79,6 +89,7 @@ impl<V: Violation> Diagnostic<V> {
     }
 }
 
+/// Format structural-rule metadata as the same document shape used by ast-grep rules.
 pub fn structural_rule_document(metadata: RuleMetadata) -> String {
     format!(
         "id: {}\nseverity: {}\ntarget: {}\nkind: structural\nmessage: {}\n",

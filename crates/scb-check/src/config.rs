@@ -91,6 +91,10 @@ impl Default for LowUseShortFunctionSettings {
 }
 
 impl Config {
+    /// Create the implicit configuration used when no configuration file is discovered.
+    ///
+    /// The base directory is copied into owned storage because the configuration survives the
+    /// borrowed current-working-directory value supplied at the CLI boundary.
     pub fn default_for(cwd: &Path) -> Self {
         Self {
             exclude: Vec::new(),
@@ -101,6 +105,7 @@ impl Config {
     }
 }
 
+/// Load an explicit configuration file or discover one from the current directory upward.
 pub fn load_config(override_path: Option<&Path>, cwd: &Path) -> Result<Config, String> {
     if let Some(path) = override_path {
         if !path.exists() {

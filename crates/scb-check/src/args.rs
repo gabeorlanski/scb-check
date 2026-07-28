@@ -64,6 +64,7 @@ enum OutputFormat {
     Json,
 }
 
+/// Parse already split CLI arguments into a normalized command.
 pub fn parse_args<I>(raw_args: I) -> Result<Command, ParseArgsError>
 where
     I: IntoIterator<Item = String>,

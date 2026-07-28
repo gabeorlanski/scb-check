@@ -4,6 +4,7 @@ use std::path::Path;
 use crate::model::{AstGrepFinding, CloneBlock, Function, Report, StructuralFinding};
 use serde_json::json;
 
+/// Serialize the report's summary metrics as one JSON object.
 pub fn render_json(report: &Report) -> String {
     json!({
         "verbosity": json_number(report.verbosity()),
@@ -38,6 +39,10 @@ fn json_number(value: f64) -> f64 {
     }
 }
 
+/// Render findings in stable human-readable order.
+///
+/// Clone groups below `min_duplicate_lines` are omitted; ast-grep, structural, and
+/// high-complexity entries are always rendered.
 pub fn render_human(
     report: &Report,
     min_duplicate_lines: Option<usize>,

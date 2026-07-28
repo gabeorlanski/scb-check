@@ -24,6 +24,10 @@ const DEFAULT_EXCLUDED_DIRS: &[&str] = &[
     "target",
 ];
 
+/// Discover supported source files below a path after applying configuration exclusions.
+///
+/// Returned records own canonical paths because parsing and reporting outlive the borrowed CLI
+/// path and configuration values used during discovery.
 pub fn discover_sources(
     path: &Path,
     config: &Config,
