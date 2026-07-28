@@ -1,11 +1,14 @@
 use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 
 use tree_sitter::Node;
 
 use crate::languages::{
-    BaseParser, CommentSpan, FunctionSpan, LanguageParser, push_children_reverse, signature_params,
+    BaseParser, CommentSpan, FunctionParams, FunctionSemantic, FunctionSpan, FunctionSyntaxFacts,
+    LanguageParser, bare_call_name, call_body, function_syntax_facts, node_text,
+    push_children_reverse, simple_expr,
 };
-use crate::model::Language;
+use crate::model::{FunctionBody, ImportBinding, Language, ScopePath, SimpleExpr, Visibility};
 
 pub static PYTHON_PARSER: PythonLanguageParser = PythonLanguageParser;
 
@@ -44,12 +47,22 @@ impl LanguageParser for PythonLanguageParser {
         BaseParser::function_span(
             source,
             node,
+            Self::semantic(source, node),
+            Self::syntax_facts(source, node),
             1 + Self::cyclomatic_increment(node),
             node.children(&mut node.walk())
                 .map(|child| Self::cognitive_for_node(child, 0))
                 .sum(),
             Self::max_nesting_for_node(node),
         )
+    }
+
+    fn import_bindings(&self, path: &Path, source: &str, root: Node<'_>) -> Vec<ImportBinding> {
+        let mut cursor = root.walk();
+        root.named_children(&mut cursor)
+            .filter(|statement| statement.kind() == "import_from_statement")
+            .flat_map(|statement| python_import_from_statement(path, source, statement))
+            .collect()
     }
 
     fn sloc_lines(
@@ -61,50 +74,62 @@ impl LanguageParser for PythonLanguageParser {
         Self::python_sloc_lines(source, root)
     }
 
-    fn function_params(&self, signature: &str) -> Vec<String> {
-        signature_params(signature, Self::param_name)
-    }
-
-    fn function_body_lines<'source>(
-        &self,
-        lines: &'source [&'source str],
-    ) -> &'source [&'source str] {
-        Self::body_lines(lines)
-    }
-
-    fn function_body_statements<'source>(&self, lines: &'source [&str]) -> Vec<&'source str> {
-        lines
-            .iter()
-            .map(|line| line.trim())
-            .filter(|line| !line.is_empty())
-            .filter(|line| !line.starts_with('#'))
-            .collect()
-    }
-
-    fn call_keywords(&self) -> &'static [&'static str] {
-        &Self::CALL_KEYWORDS
-    }
-
     fn directive_text<'comment>(&self, comment: &'comment CommentSpan) -> Option<&'comment str> {
         comment.text.strip_prefix('#').map(str::trim)
     }
 }
 
+fn python_module_file_suffixes(module_segments: &[&str]) -> Vec<PathBuf> {
+    if module_segments.is_empty() {
+        return Vec::new();
+    }
+    let module_path: PathBuf = module_segments.iter().collect();
+    let mut module_file = module_path.clone();
+    module_file.set_extension("py");
+    vec![module_file, module_path.join("__init__.py")]
+}
+
+fn python_import_from_statement(
+    path: &Path,
+    source: &str,
+    statement: Node<'_>,
+) -> Vec<ImportBinding> {
+    let Some(module) = statement.child_by_field_name("module_name") else {
+        return Vec::new();
+    };
+    let module_text = node_text(source, module);
+    let module_segments: Vec<&str> = module_text
+        .trim_start_matches('.')
+        .split('.')
+        .filter(|segment| !segment.is_empty())
+        .collect();
+    let target_file_suffixes = python_module_file_suffixes(&module_segments);
+    let mut cursor = statement.walk();
+    statement
+        .named_children(&mut cursor)
+        .filter(|imported| imported.id() != module.id() && imported.kind() != "wildcard_import")
+        .filter_map(|imported| {
+            let (target, local) = if imported.kind() == "aliased_import" {
+                (
+                    node_text(source, imported.child_by_field_name("name")?),
+                    node_text(source, imported.child_by_field_name("alias")?),
+                )
+            } else {
+                let target = node_text(source, imported);
+                let local = target.split('.').next()?.to_string();
+                (target, local)
+            };
+            Some(ImportBinding {
+                file: path.to_path_buf(),
+                local_name: local,
+                target_name: target.rsplit('.').next()?.to_string(),
+                target_file_suffixes: target_file_suffixes.clone(),
+            })
+        })
+        .collect()
+}
+
 impl PythonLanguageParser {
-    const CALL_KEYWORDS: [&'static str; 14] = [
-        "if", "elif", "for", "while", "return", "raise", "with", "def", "class", "lambda", "not",
-        "and", "or", "assert",
-    ];
-
-    fn param_name(param: &str) -> Option<String> {
-        let name = param.split([':', '=']).next().unwrap_or_default().trim();
-        (!name.is_empty() && name != "self" && name != "cls").then(|| name.to_string())
-    }
-
-    fn body_lines<'line>(lines: &'line [&str]) -> &'line [&'line str] {
-        if lines.len() <= 1 { &[] } else { &lines[1..] }
-    }
-
     fn python_sloc_lines(source: &str, root: Node<'_>) -> BTreeSet<usize> {
         let mut lines = BTreeSet::new();
         Self::collect_python_sloc_token_lines(source, root, &mut lines);
@@ -180,8 +205,32 @@ impl PythonLanguageParser {
         let literal = node.named_child(0)?;
         ((BaseParser::is_string_node(literal.kind())
             || BaseParser::is_string_statement_text(source, literal))
+            && Self::is_plain_string_literal(source, literal)
             && Self::owns_line(literal, source_lines))
         .then_some(literal)
+    }
+
+    fn is_plain_string_literal(source: &str, literal: Node<'_>) -> bool {
+        let mut stack = vec![literal];
+        while let Some(node) = stack.pop() {
+            if BaseParser::is_string_node(node.kind()) {
+                let text = node
+                    .utf8_text(source.as_bytes())
+                    .unwrap_or_default()
+                    .trim_start();
+                let prefix = text
+                    .split_once(['\'', '"'])
+                    .map_or("", |(prefix, _)| prefix);
+                if prefix
+                    .chars()
+                    .any(|character| matches!(character.to_ascii_lowercase(), 'b' | 'f'))
+                {
+                    return false;
+                }
+            }
+            push_children_reverse(node, &mut stack);
+        }
+        true
     }
 
     fn owns_line(literal: Node<'_>, source_lines: &[&str]) -> bool {
@@ -280,4 +329,230 @@ impl PythonLanguageParser {
                 | "if_clause"
         )
     }
+
+    fn semantic(source: &str, node: Node<'_>) -> FunctionSemantic {
+        let name = node_name(source, node).unwrap_or_else(|| "<unknown>".to_string());
+        let visibility = visibility_for_name(&name);
+        let ancestors = named_ancestor_scopes(source, node);
+        let mut qualified_segments: Vec<String> =
+            ancestors.iter().map(|scope| scope.name.clone()).collect();
+        qualified_segments.push(name);
+        let qualified_name = qualified_segments.join(".");
+        let enclosing_functions: Vec<ScopePath> = ancestors
+            .iter()
+            .filter(|scope| scope.kind == PythonScopeKind::Function)
+            .map(|scope| scope.path.clone())
+            .collect();
+        let bare_call_scope = enclosing_functions
+            .last()
+            .cloned()
+            .or_else(|| ancestors.is_empty().then(ScopePath::default));
+        let mut visible_bare_call_scopes = Vec::new();
+        visible_bare_call_scopes.push(ScopePath {
+            segments: qualified_segments,
+        });
+        visible_bare_call_scopes.extend(enclosing_functions.into_iter().rev());
+        visible_bare_call_scopes.push(ScopePath::default());
+        FunctionSemantic {
+            qualified_name,
+            visibility,
+            bare_call_scope,
+            visible_bare_call_scopes,
+        }
+    }
+
+    fn syntax_facts(source: &str, node: Node<'_>) -> FunctionSyntaxFacts {
+        function_syntax_facts(
+            source,
+            node,
+            |parameters| Self::params(source, parameters),
+            Self::is_nested_function,
+            |call| Self::bare_call_name(source, call),
+            |node| Self::is_cognitive_flow_break_node(node.kind()),
+            |body, params| Self::body(source, body, params),
+        )
+    }
+
+    fn params(source: &str, parameters: Node<'_>) -> FunctionParams {
+        let mut params = Vec::new();
+        let mut has_receiver = false;
+        let mut has_nontrivial = false;
+        let mut cursor = parameters.walk();
+        for child in parameters.named_children(&mut cursor) {
+            has_nontrivial |= python_parameter_has_nontrivial_semantics(child);
+            if let Some(name) = first_identifier_text(source, child) {
+                if matches!(name.as_str(), "self" | "cls") {
+                    has_receiver = true;
+                } else {
+                    params.push(name);
+                }
+            }
+        }
+        FunctionParams {
+            has_receiver,
+            names: params,
+            has_nontrivial,
+        }
+    }
+
+    fn is_nested_function(kind: &str) -> bool {
+        kind == "function_definition"
+    }
+
+    fn bare_call_name(source: &str, node: Node<'_>) -> Option<String> {
+        bare_call_name(source, node, "call", "identifier")
+    }
+
+    fn body(source: &str, body: Node<'_>, params: &[String]) -> FunctionBody {
+        let statements = meaningful_body_statements(body);
+        if statements.len() != 1 {
+            return FunctionBody::Complex;
+        }
+        let expression = return_or_expression_child(statements[0]);
+        expression.map_or(FunctionBody::Complex, |expression| {
+            expression_body(source, expression, params)
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PythonScopeKind {
+    Class,
+    Function,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct NamedScope {
+    name: String,
+    path: ScopePath,
+    kind: PythonScopeKind,
+}
+
+fn named_ancestor_scopes(source: &str, node: Node<'_>) -> Vec<NamedScope> {
+    let mut ancestors = Vec::new();
+    let mut parent = node.parent();
+    while let Some(current) = parent {
+        let kind = match current.kind() {
+            "class_definition" => Some(PythonScopeKind::Class),
+            "function_definition" => Some(PythonScopeKind::Function),
+            _ => None,
+        };
+        if let Some(kind) =
+            kind.and_then(|kind| node_name(source, current).map(|name| (kind, name)))
+        {
+            ancestors.push(kind);
+        }
+        parent = current.parent();
+    }
+    ancestors.reverse();
+
+    let mut qualified = Vec::new();
+    ancestors
+        .into_iter()
+        .map(|(kind, name)| {
+            qualified.push(name.clone());
+            NamedScope {
+                name,
+                path: ScopePath {
+                    segments: qualified.clone(),
+                },
+                kind,
+            }
+        })
+        .collect()
+}
+
+fn node_name(source: &str, node: Node<'_>) -> Option<String> {
+    node.child_by_field_name("name")
+        .map(|name| node_text(source, name))
+}
+
+fn visibility_for_name(name: &str) -> Visibility {
+    if name.starts_with('_') {
+        Visibility::Private
+    } else {
+        Visibility::Public
+    }
+}
+
+fn python_parameter_has_nontrivial_semantics(parameter: Node<'_>) -> bool {
+    let mut stack = vec![parameter];
+    while let Some(node) = stack.pop() {
+        if matches!(
+            node.kind(),
+            "default_parameter"
+                | "typed_default_parameter"
+                | "list_splat_pattern"
+                | "dictionary_splat_pattern"
+                | "keyword_separator"
+                | "positional_separator"
+                | "tuple_pattern"
+        ) {
+            return true;
+        }
+        push_children_reverse(node, &mut stack);
+    }
+    false
+}
+
+fn meaningful_body_statements(body: Node<'_>) -> Vec<Node<'_>> {
+    let mut cursor = body.walk();
+    body.named_children(&mut cursor)
+        .filter(|child| !matches!(child.kind(), "comment" | "function_definition"))
+        .filter(|child| {
+            !(child.kind() == "expression_statement"
+                && child.named_child(0).is_some_and(|grandchild| {
+                    matches!(grandchild.kind(), "string" | "concatenated_string")
+                }))
+        })
+        .collect()
+}
+
+fn return_or_expression_child(statement: Node<'_>) -> Option<Node<'_>> {
+    match statement.kind() {
+        "return_statement" | "expression_statement" => statement.named_child(0),
+        _ => Some(statement),
+    }
+}
+
+fn expression_body(source: &str, expression: Node<'_>, params: &[String]) -> FunctionBody {
+    match expression.kind() {
+        "call" => call_body(source, expression, params),
+        "identifier" => {
+            let name = node_text(source, expression);
+            if params.iter().any(|param| param == &name) {
+                FunctionBody::SimpleReturn(SimpleExpr::Param(name))
+            } else if is_constant_name(&name) {
+                FunctionBody::SimpleReturn(SimpleExpr::Constant)
+            } else {
+                FunctionBody::Complex
+            }
+        }
+        "string" | "integer" | "float" | "true" | "false" | "none" => {
+            FunctionBody::SimpleReturn(simple_expr(source, expression, params))
+        }
+        _ => FunctionBody::Complex,
+    }
+}
+
+fn is_constant_name(name: &str) -> bool {
+    name.chars()
+        .any(|character| character.is_ascii_alphabetic())
+        && name.chars().all(|character| {
+            character.is_ascii_uppercase() || character.is_ascii_digit() || character == '_'
+        })
+}
+
+fn first_identifier_text(source: &str, node: Node<'_>) -> Option<String> {
+    if node.kind() == "identifier" {
+        return Some(node_text(source, node));
+    }
+    let mut stack = vec![node];
+    while let Some(current) = stack.pop() {
+        if current.kind() == "identifier" {
+            return Some(node_text(source, current));
+        }
+        push_children_reverse(current, &mut stack);
+    }
+    None
 }

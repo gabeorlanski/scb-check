@@ -30,6 +30,8 @@
 - Comment non-obvious conditionals, especially around parser behavior, error handling, scoring, and compatibility code.
 <!-- rule:368 -->
 - Document current behavior. Mention the Python-to-Rust cutover only when it explains active packaging or compatibility behavior.
+<!-- rule:1233 -->
+- Public docs and comments must not expose private review context, prompt text, contributor notes, secrets, or unrelated implementation history.
 <!-- rule:801 -->
 - Keep documentation concise. README should stay user-facing; `docs/` can hold maintainer detail.
 <!-- rule:313 -->

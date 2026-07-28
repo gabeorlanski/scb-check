@@ -53,7 +53,7 @@ CLI (`crates/scb-check`, packaged into Python wheels as a direct script for `uvx
 ## Layers
 
 - Boundary: the Rust crate parses public CLI arguments, loads configuration, walks paths, and renders output. Python packaging is only used to deliver the compiled Rust binary for `uvx`.
-- Parsing and facts: `crates/scb-check/src/languages/`, `directives.rs`, and `analyze.rs` parse already-read Python/Rust source, compute `SLOC`, parse source directives, and build shared facts.
+- Parsing and facts: `crates/scb-check/src/languages/` owns language-specific tree-sitter parsing, syntax/convention lowering, `SLOC`, comments, function facts, call facts, complexity, and clone fingerprints. `directives.rs` consumes normalized comment facts, and `analyze.rs` assembles language-agnostic facts for scoring and rules.
 - Analysis integrations: `clones.rs` owns normalized clone hashing, and `astgrep.rs` owns in-process ast-grep matching for bundled and extra Python YAML rules.
 - Rules: `rules/` owns structural rule metadata, registration, and Rust-coded rule implementations.
 - Reporting: `render.rs` turns reports into JSON or human-readable flag text. JSON reports include score summaries plus syntax tree and node counts by parsed language.
@@ -90,11 +90,14 @@ CLI (`crates/scb-check`, packaged into Python wheels as a direct script for `uvx
 - Line numbers are 1-indexed after tree-sitter data leaves the parser layer.
 - Supported scan targets are Python (`.py`, `.pyw`) and Rust (`.rs`).
 - Python ast-grep rules are Python-only. Source directives use each language adapter's comment syntax.
-- Parser-native data may feed clone fingerprints and shared facts, but structural rules do not inspect tree-sitter nodes directly.
+- Parser-native data may feed clone fingerprints and shared facts inside language adapters, but core analysis and structural rules do not inspect language-native tree-sitter nodes directly.
 - ast-grep runs in process through Rust ast-grep crates. Invalid bundled or extra rules are user-facing errors.
 - Source ignores and structural rules share one rule ID namespace, so `scbc ignore[...]` is never ambiguous.
+- Invalid source directives fail with exit code `2` regardless of `--include-all`; visibility flags do not relax directive validation.
 - Clone and erosion findings are not suppressible. `ast-grep` and structural findings are suppressible.
 - Shared records cross module boundaries as strict Rust structs and enums.
+- Shared parser facts are intentionally minimal. Add language-neutral facts only for concrete scoring or structural-rule needs.
+- Structural rules must not rely on bare identifier names as semantic proof. Names are useful for display and conservative hints, but rules need spans, simple-return body facts, `CallGraph` relationships, typed scope facts, or another explicit shared fact before making a finding that depends on symbol identity.
 
 ## Scoring-sensitive surfaces
 
@@ -110,5 +113,5 @@ Change these only with tests and documentation updates because they move user-vi
 ## Extension points
 
 - Extra `ast-grep` rules: set `SCB_CHECK_EXTRA_SLOP_RULES` to a `:`-separated list of YAML files.
-- Structural rules: add a Rust rule file in `rules/`, implement a per-rule `Violation`, register it in the `Rule` enum, and keep it on shared facts.
+- Structural rules: add a Rust rule file in `rules/`, implement a per-rule `Violation`, register it in the `Rule` enum, and keep it on shared facts rather than bare-name assumptions.
 - New public CLI commands: add them to `crates/scb-check`; do not add command logic to the Python shim.

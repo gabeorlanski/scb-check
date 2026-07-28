@@ -1,5 +1,5 @@
 use crate::config::LowUseShortFunctionSettings;
-use crate::model::{CallSite, Function, StructuralFinding};
+use crate::model::{Function, ResolvedCall, StructuralFinding};
 use crate::rules::base::{Diagnostic, FixAvailability, RuleContext, RuleMetadata, Violation};
 
 pub struct LowUseShortFunction {
@@ -35,22 +35,30 @@ impl Violation for LowUseShortFunction {
 
 pub fn check(context: &RuleContext<'_>, findings: &mut Vec<StructuralFinding>) {
     if context.low_use_short_function.enabled {
-        findings.extend(context.functions.iter().filter_map(|function| {
-            low_use_short_function(function, context.functions, context.low_use_short_function)
-        }));
+        findings.extend(
+            context
+                .functions
+                .iter()
+                .filter_map(|function| low_use_short_function(function, context)),
+        );
     }
 }
 
 fn low_use_short_function(
     function: &Function,
-    functions: &[Function],
-    settings: &LowUseShortFunctionSettings,
+    context: &RuleContext<'_>,
 ) -> Option<StructuralFinding> {
+    let settings = context.low_use_short_function;
     if function.sloc > settings.max_function_sloc {
         return None;
     }
 
-    let call_sites = call_sites_for(function, functions);
+    let call_sites = context
+        .call_graph
+        .incoming_to(context.functions, &function.id)
+        .into_iter()
+        .filter(|call| call.caller.id != function.id)
+        .collect::<Vec<_>>();
     if call_sites.is_empty() || call_sites.len() > settings.max_call_sites {
         return None;
     }
@@ -73,47 +81,27 @@ fn low_use_short_function(
     )
 }
 
-fn call_sites_for<'a>(
-    function: &Function,
-    functions: &'a [Function],
-) -> Vec<(&'a Function, &'a CallSite)> {
-    functions
-        .iter()
-        .filter(|caller| caller.file != function.file || caller.start_line != function.start_line)
-        .flat_map(|caller| {
-            caller
-                .calls
-                .iter()
-                .filter(|call| call.name == function.name)
-                .map(move |call| (caller, call))
-        })
-        .collect()
-}
-
 fn callers_stay_within_budgets(
     function: &Function,
-    call_sites: &[(&Function, &CallSite)],
+    call_sites: &[ResolvedCall<'_>],
     settings: &LowUseShortFunctionSettings,
 ) -> bool {
-    call_sites.iter().all(|(caller, call)| {
+    let inline_sloc_delta = function.sloc.saturating_sub(1);
+    let inline_cyclomatic_delta = function.cyclomatic.saturating_sub(1);
+
+    call_sites.iter().all(|resolved_call| {
+        let caller = resolved_call.caller;
+        let call = resolved_call.call;
         let call_count = call_sites
             .iter()
-            .filter(|(other, _)| other.file == caller.file && other.start_line == caller.start_line)
+            .filter(|other| other.caller.id == caller.id)
             .count();
-        caller.sloc + inline_sloc_delta(function) * call_count <= settings.max_inline_caller_sloc
-            && caller.cyclomatic + inline_cyclomatic_delta(function) * call_count
+        caller.sloc + inline_sloc_delta * call_count <= settings.max_inline_caller_sloc
+            && caller.cyclomatic + inline_cyclomatic_delta * call_count
                 <= settings.max_inline_caller_complexity
             && caller.cognitive + function.cognitive * call_count
                 <= settings.max_inline_caller_cognitive_complexity
             && caller.max_nesting.max(call.nesting + function.max_nesting)
                 <= settings.max_inline_call_nesting
     })
-}
-
-const fn inline_sloc_delta(function: &Function) -> usize {
-    function.sloc.saturating_sub(1)
-}
-
-const fn inline_cyclomatic_delta(function: &Function) -> usize {
-    function.cyclomatic.saturating_sub(1)
 }

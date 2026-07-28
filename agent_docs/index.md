@@ -24,6 +24,8 @@
 - Scope helpers and constants to their single usage site unless reuse is real.
 <!-- rule:499 -->
 - Reuse static parser/rule metadata where possible. Do not rebuild expensive tree-sitter, ast-grep, or glob state in hot loops.
+<!-- rule:1230 -->
+- Cache expensive parser, rule, glob, regex, and config setup outside per-file or per-node loops when the setup does not depend on the current item.
 <!-- rule:1200 -->
 - Keep command-boundary, config/walking, analysis, rule, and rendering responsibilities separate.
 
@@ -45,11 +47,15 @@
 - Prefer borrowing and moving over cloning. Clone only when ownership truly must be duplicated, and keep clones close to the ownership boundary.
 <!-- rule:1201 -->
 - Shared model structs in `model.rs` are contracts between parser, analysis, reporting, and rules. Keep them explicit, cohesive, and resistant to invalid states.
+<!-- rule:1231 -->
+- Do not use `.unwrap()` in production paths. Use `.expect("...")` only for impossible invariant violations, and make the message describe the invariant rather than the symptom.
 
 ## Error Handling
 
 <!-- rule:400 -->
 - Do not route core control flow through formatted strings. Use typed errors internally and format at the CLI boundary.
+<!-- rule:1232 -->
+- Do not pass `String` errors across internal module layers when callers need to branch on failure kind. Use typed error enums internally; reserve strings for rendering user-facing diagnostics.
 <!-- rule:32 -->
 - Use precise error messages for user-facing failures; quote arbitrary runtime values clearly.
 <!-- rule:353 -->
@@ -81,7 +87,7 @@
 <!-- rule:1211 -->
 - Prefer set operations for line accounting. `SLOC` intersections and clone/ast-grep/structural unions should be expressed directly to avoid double-counting bugs.
 <!-- rule:1212 -->
-- Prefer tree-sitter node facts over ad hoc string parsing for syntax, parameters, return expressions, call sites, and comments.
+- In language adapters, prefer tree-sitter node facts over ad hoc string parsing for syntax, parameters, return expressions, call sites, and comments; outside adapters, core analysis and rules consume lowered language-agnostic facts only.
 <!-- rule:1214 -->
 - Keep scoring-sensitive calculations deterministic. Preserve stable sorting and compensated summation unless a scoring change explicitly updates tests and docs.
 <!-- rule:1215 -->
@@ -122,6 +128,8 @@
 - Document what code does now, not what it used to do. Mention Python cutover history only when it explains active packaging compatibility.
 <!-- rule:801 -->
 - Keep documentation concise and user-facing unless the file is a maintainer guide.
+<!-- rule:1233 -->
+- Public docs and comments must describe supported behavior without leaking private review context, prompts, contributor notes, secrets, or unrelated implementation history.
 <!-- rule:623 -->
 - Avoid line numbers in comments and Rust doc comments because they become stale immediately.
 
@@ -129,6 +137,8 @@
 
 <!-- rule:449 -->
 - Use `cargo` for Rust dependency and workflow changes. Use `uv` only for Python packaging/build-hook dependencies.
+<!-- rule:1234 -->
+- Avoid wildcard imports such as `use module::*` in production code. Limit them to explicit preludes, prelude re-exports, and test modules such as `use super::*`.
 <!-- rule:1205 -->
 - Run the Rust workflow after Rust changes: `cargo fmt --check`, `cargo test --all --all-features`, `cargo clippy --all --all-targets --all-features -- -D warnings`, and `cargo run -p scb-check -- check .`.
 <!-- rule:1206 -->

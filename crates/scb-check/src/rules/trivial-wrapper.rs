@@ -1,4 +1,4 @@
-use crate::model::{BodyShape, Function, StructuralFinding};
+use crate::model::{Function, FunctionBody, SimpleExpr, StructuralFinding, Visibility};
 use crate::rules::base::{Diagnostic, FixAvailability, RuleContext, RuleMetadata, Violation};
 
 pub struct TrivialWrapper {
@@ -28,14 +28,22 @@ pub fn check(context: &RuleContext<'_>, findings: &mut Vec<StructuralFinding>) {
 }
 
 fn trivial_wrapper(function: &Function) -> Option<StructuralFinding> {
-    if function.name.starts_with('_') {
+    if function.visibility != Visibility::Private
+        || function.has_receiver
+        || function.has_nontrivial_params
+    {
         return None;
     }
 
-    let removable = match &function.body_shape {
-        BodyShape::IdentityReturn { value } => function.params.iter().any(|param| param == value),
-        BodyShape::CallReturn { args, .. } => forwards_only_params(function, args),
-        BodyShape::Complex => false,
+    let removable = match &function.body {
+        FunctionBody::SimpleReturn(SimpleExpr::Param(_)) => true,
+        FunctionBody::SimpleReturn(SimpleExpr::Constant | SimpleExpr::Literal) => {
+            function.params.is_empty()
+        }
+        FunctionBody::SimpleReturn(SimpleExpr::Call(call)) => {
+            forwards_only_params(function, &call.args)
+        }
+        FunctionBody::SimpleReturn(SimpleExpr::Unsupported) | FunctionBody::Complex => false,
     };
 
     removable.then(|| {
@@ -52,10 +60,13 @@ fn trivial_wrapper(function: &Function) -> Option<StructuralFinding> {
     })
 }
 
-fn forwards_only_params(function: &Function, args: &[String]) -> bool {
+fn forwards_only_params(function: &Function, args: &[SimpleExpr]) -> bool {
     !args.is_empty()
         && args.len() == function.params.len()
         && args
             .iter()
-            .all(|arg| function.params.iter().any(|param| param == arg))
+            .zip(&function.params)
+            .all(|(argument, parameter)| {
+                matches!(argument, SimpleExpr::Param(name) if name == parameter)
+            })
 }

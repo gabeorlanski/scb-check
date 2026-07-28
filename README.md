@@ -41,7 +41,7 @@ scb-check check PATH --report           # shortcut for --output-format json
 scb-check check PATH -v / --verbosity   # add info logging
 scb-check check PATH -vv                # add debug logging
 scb-check check PATH --config FILE      # explicit config path
-scb-check check PATH --include-all      # include gitignored files plus ignored, lower-severity, and boundary-suppressed findings
+scb-check check PATH --include-all      # include gitignored files plus ignored, informational, and boundary-suppressed findings
 scb-check check PATH --disable-sg  # skip ast-grep findings
 scb-check check PATH --min-duplicate-lines N  # show duplicate groups with at least N SLOC lines
 scb-check rule RULE_ID                  # print YAML or metadata for a specific rule
@@ -152,7 +152,7 @@ def _load_toml(path: Path) -> dict[str, Any]:
     ...
 ```
 
-Boundary directives must be inside the function body, after the function signature line. By default, ast-grep findings inside that function are hidden, and informational ast-grep rules are omitted. Use `--include-all` to show ignored, informational, and boundary-suppressed ast-grep findings.
+Boundary directives must be inside the function body, after the function signature line. By default, ast-grep findings inside that function are hidden, and informational ast-grep rules are omitted. Use `--include-all` to show ignored findings, informational ast-grep findings, and boundary-suppressed ast-grep findings.
 
 Rules:
 
@@ -162,14 +162,14 @@ Rules:
 - Standalone ignore directives apply to the next non-blank, non-comment code line.
 - Boundary directives apply to the containing function body.
 - Ast-grep and structural rule findings are suppressible; clone and erosion findings are not.
-- Invalid directives fail the run with exit code `2` unless `--include-all` is used.
+- Invalid directives always fail the run with exit code `2`; `--include-all` only affects discovery and finding visibility.
 
 ## How it works
 
 - **Tree walking**: Rust tree-sitter parsing emits shared Python/Rust facts for SLOC, functions, comments, complexity, call sites, and clone fingerprints.
 - **Clone detection**: hashed parser-derived function-body fingerprints across the scanned set; two or more matching instances become a `CloneBlock`.
 - **Slop patterns**: Python ast-grep rules in `crates/scb-check/src/languages/python/ast_grep_rules/` split by category (e.g. `range(len(x))`, `dict.get(k, None)`, `isinstance` ladders, manual min/max, defensive guards).
-- **Structural rules**: Rust-coded structural rules run over shared Python/Rust facts. `trivial-wrapper` flags removable single-return pass-through functions, and `low-use-short-function` flags short helpers with few call sites only when inlining them stays within configured caller SLOC, complexity, cognitive complexity, and nesting budgets.
+- **Structural rules**: Rust-coded structural rules run over shared Python/Rust facts. `trivial-wrapper` flags private removable single-return pass-through or constant-return helpers, and `low-use-short-function` flags short helpers with few call sites only when inlining them stays within configured caller SLOC, complexity, cognitive complexity, and nesting budgets.
 - **Extra local slop patterns**: set `SCB_CHECK_EXTRA_SLOP_RULES` to a `:`-separated list of YAML paths to layer additional rules on top of the bundled set.
 - **Complexity**: per-function cyclomatic and cognitive complexity plus SLOC, combined into mass scores for erosion metrics with stable sorted and compensated summation.
 

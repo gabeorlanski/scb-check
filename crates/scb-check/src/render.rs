@@ -263,7 +263,7 @@ fn render_clone_group(group: &CloneGroup, line_count: usize) -> String {
 }
 
 const fn clone_line_count(clone: &CloneBlock) -> usize {
-    clone.end_line.saturating_sub(clone.start_line) + 1
+    clone.sloc
 }
 
 fn render_ast_grep(
@@ -431,7 +431,7 @@ mod tests {
         write(
             &root.join("sample.py"),
             r"
-def identity(value):
+def _identity(value):
     return value
 
 def noisy(items):
@@ -451,7 +451,7 @@ def noisy(items):
             .find("warning[for-range-len]")
             .expect("ast-grep finding should render");
         assert!(structural_index < ast_index);
-        assert!(rendered.contains("1 | def identity(value):"));
+        assert!(rendered.contains("1 | def _identity(value):"));
         assert!(rendered.contains("2 |     return value"));
         assert!(rendered.contains("4 | def noisy(items):"));
         assert!(rendered.contains("5 |     for index in range(len(items)):"));

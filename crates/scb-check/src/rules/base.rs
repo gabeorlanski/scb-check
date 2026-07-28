@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crate::config::LowUseShortFunctionSettings;
-use crate::model::{Function, StructuralFinding};
+use crate::model::{CallGraph, Function, StructuralFinding};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FixAvailability {
@@ -21,6 +21,7 @@ pub struct RuleMetadata {
 #[derive(Debug, Clone, Copy)]
 pub struct RuleContext<'a> {
     pub functions: &'a [Function],
+    pub call_graph: &'a CallGraph,
     pub low_use_short_function: &'a LowUseShortFunctionSettings,
 }
 

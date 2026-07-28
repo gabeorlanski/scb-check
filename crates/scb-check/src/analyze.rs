@@ -2,21 +2,21 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::astgrep::{ast_grep_rule_ids, ast_grep_thresholds, run_python_rules};
+use crate::astgrep::AstGrepCatalog;
 use crate::clones::{CloneCandidate, detect_clones, function_clone_candidate};
 use crate::config::LowUseShortFunctionSettings;
 use crate::directives::{
     BoundaryDirective, IgnoreDirective, filter_ast_grep_findings, filter_structural_findings,
     parse_source_directives,
 };
-use crate::languages::{function_lines, lower_function, parse_syntax};
+use crate::languages::{ast_grep_language, function_lines, lower_function, parse_syntax_at_path};
 use crate::model::{
-    AstGrepFinding, Function, Language, LanguageSyntaxSummary, Report, SourceFile, SourceLines,
-    StructuralFinding,
+    AstGrepFinding, CallGraph, CallSite, CloneBlock, Function, FunctionId, ImportBinding, Language,
+    LanguageSyntaxSummary, Report, SourceFile, SourceLines, StructuralFinding,
 };
 use crate::rules::{run_structural_rules, structural_rule_ids};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct ParsedFile {
     path: PathBuf,
     language: Language,
@@ -26,20 +26,46 @@ struct ParsedFile {
     ast_grep_findings: Vec<AstGrepFinding>,
     ignore_directives: Vec<IgnoreDirective>,
     boundary_directives: Vec<BoundaryDirective>,
+    imports: Vec<ImportBinding>,
     node_count: usize,
     source_lines: SourceLines,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct ProjectFacts {
     functions: Vec<Function>,
     clone_candidates: Vec<CloneCandidate>,
     ast_grep_findings: Vec<AstGrepFinding>,
     ignore_directives: Vec<IgnoreDirective>,
     boundary_directives: Vec<BoundaryDirective>,
+    imports: Vec<ImportBinding>,
     total_loc: usize,
     source_lines: Vec<SourceLines>,
     syntax_counts: BTreeMap<Language, (usize, usize)>,
+}
+
+#[derive(Debug)]
+struct LineSummary {
+    verbosity_flagged: usize,
+    clone: usize,
+    ast_grep_flagged: usize,
+    structural_rule: usize,
+}
+
+#[derive(Debug)]
+struct FunctionSummary {
+    high_cc_functions: usize,
+    high_cog_functions: usize,
+    total_mass: f64,
+    high_cc_mass: f64,
+    total_cog_mass: f64,
+    high_cog_mass: f64,
+}
+
+#[derive(Debug)]
+enum ParseFileError {
+    Directive(String),
+    Parse(String),
 }
 
 pub fn analyze(
@@ -48,70 +74,58 @@ pub fn analyze(
     include_all: bool,
     low_use_short_function: &LowUseShortFunctionSettings,
 ) -> Result<Report, String> {
-    let valid_rule_ids = valid_rule_ids()?;
-    let parsed_files = parse_files(files, disable_sg, include_all, &valid_rule_ids)?;
-    let project = collect_project_facts(&parsed_files);
-    let clones = detect_clones(project.clone_candidates.clone());
-    let clone_lines = finding_item_lines(&clones, &parsed_files);
+    let ast_grep_catalog = AstGrepCatalog::load()?;
+    let valid_rule_ids = valid_rule_ids(&ast_grep_catalog)?;
+    let mut parsed_files = parse_files(
+        files,
+        disable_sg,
+        include_all,
+        &valid_rule_ids,
+        &ast_grep_catalog,
+    )?;
+    let files_scanned = parsed_files.len();
+    let mut project = collect_project_facts(&mut parsed_files);
+    resolve_project_call_sites(&mut project.functions, &project.imports);
+    let call_graph = CallGraph::from_functions(&project.functions);
+    let clones = detect_clones(project.clone_candidates);
     let mut ast_grep_findings = project.ast_grep_findings;
-    let mut structural_findings = run_structural_rules(&project.functions, low_use_short_function);
+    let mut structural_findings =
+        run_structural_rules(&project.functions, &call_graph, low_use_short_function);
+    ast_grep_findings = filter_ast_grep_findings(
+        ast_grep_findings,
+        &project.ignore_directives,
+        &project.boundary_directives,
+        &project.functions,
+        include_all,
+    )?;
     if !include_all {
-        ast_grep_findings = filter_ast_grep_findings(
-            ast_grep_findings,
-            &project.ignore_directives,
-            &project.boundary_directives,
-            &project.functions,
-        )?;
-        ast_grep_findings = apply_count_thresholds(ast_grep_findings)?;
+        ast_grep_findings = apply_count_thresholds(ast_grep_findings, &ast_grep_catalog);
         structural_findings =
             filter_structural_findings(structural_findings, &project.ignore_directives);
     }
-    let structural_lines = finding_item_lines(&structural_findings, &parsed_files);
-    let ast_grep_lines = finding_item_lines(&ast_grep_findings, &parsed_files);
-    let ast_grep_flagged_loc = ast_grep_lines.len();
-    let clone_loc = clone_lines.len();
-    let mut verbosity_lines = clone_lines;
-    verbosity_lines.extend(ast_grep_lines.iter().cloned());
-    verbosity_lines.extend(structural_lines.iter().cloned());
-    let verbosity_flagged_loc = verbosity_lines.len();
-
-    let sorted_functions = sorted_scored_functions(&project.functions);
-    let high_cc_functions = sorted_functions
-        .iter()
-        .filter(|function| function.is_high_cc())
-        .count();
-    let high_cog_functions = sorted_functions
-        .iter()
-        .filter(|function| function.is_high_cog())
-        .count();
-    let total_mass = sum_mass(sorted_functions.iter().map(|function| function.cc_mass()));
-    let high_cc_mass = sorted_functions
-        .iter()
-        .filter(|function| function.is_high_cc())
-        .map(|function| function.cc_mass());
-    let high_cc_mass = sum_mass(high_cc_mass);
-    let total_cog_mass = sum_mass(sorted_functions.iter().map(|function| function.cog_mass()));
-    let high_cog_mass = sorted_functions
-        .iter()
-        .filter(|function| function.is_high_cog())
-        .map(|function| function.cog_mass());
-    let high_cog_mass = sum_mass(high_cog_mass);
+    let line_summary = line_summary(
+        &clones,
+        &ast_grep_findings,
+        &structural_findings,
+        &parsed_files,
+    );
+    let function_summary = function_summary(&project.functions);
 
     Ok(Report {
-        files_scanned: parsed_files.len(),
+        files_scanned,
         total_loc: project.total_loc,
-        verbosity_flagged_loc,
-        clone_loc,
-        ast_grep_flagged_loc,
-        structural_rule_loc: structural_lines.len(),
+        verbosity_flagged_loc: line_summary.verbosity_flagged,
+        clone_loc: line_summary.clone,
+        ast_grep_flagged_loc: line_summary.ast_grep_flagged,
+        structural_rule_loc: line_summary.structural_rule,
         structural_rule_findings: structural_findings.len(),
         total_functions: project.functions.len(),
-        high_cc_functions,
-        high_cog_functions,
-        total_mass,
-        high_cc_mass,
-        total_cog_mass,
-        high_cog_mass,
+        high_cc_functions: function_summary.high_cc_functions,
+        high_cog_functions: function_summary.high_cog_functions,
+        total_mass: function_summary.total_mass,
+        high_cc_mass: function_summary.high_cc_mass,
+        total_cog_mass: function_summary.total_cog_mass,
+        high_cog_mass: function_summary.high_cog_mass,
         syntax_by_language: project
             .syntax_counts
             .into_iter()
@@ -148,6 +162,123 @@ fn sorted_scored_functions(functions: &[Function]) -> Vec<&Function> {
     sorted
 }
 
+fn line_summary(
+    clones: &[CloneBlock],
+    ast_grep_findings: &[AstGrepFinding],
+    structural_findings: &[StructuralFinding],
+    parsed_files: &[ParsedFile],
+) -> LineSummary {
+    let clone_lines = finding_item_lines(clones, parsed_files);
+    let ast_grep_lines = finding_item_lines(ast_grep_findings, parsed_files);
+    let structural_lines = finding_item_lines(structural_findings, parsed_files);
+    let clone_loc = clone_lines.len();
+    let ast_grep_flagged_loc = ast_grep_lines.len();
+    let structural_rule_loc = structural_lines.len();
+    let mut verbosity_lines = clone_lines;
+    verbosity_lines.extend(ast_grep_lines);
+    verbosity_lines.extend(structural_lines);
+
+    LineSummary {
+        verbosity_flagged: verbosity_lines.len(),
+        clone: clone_loc,
+        ast_grep_flagged: ast_grep_flagged_loc,
+        structural_rule: structural_rule_loc,
+    }
+}
+
+fn resolve_project_call_sites(functions: &mut [Function], imports: &[ImportBinding]) {
+    let targets: Vec<Vec<Option<FunctionId>>> = functions
+        .iter()
+        .map(|caller| {
+            caller
+                .calls
+                .iter()
+                .map(|call| resolve_bare_call(caller, call, functions, imports))
+                .collect()
+        })
+        .collect();
+
+    for (function, resolved_targets) in functions.iter_mut().zip(targets) {
+        for (call, target) in function.calls.iter_mut().zip(resolved_targets) {
+            call.target = target;
+        }
+    }
+}
+
+fn resolve_bare_call(
+    caller: &Function,
+    call: &CallSite,
+    functions: &[Function],
+    imports: &[ImportBinding],
+) -> Option<FunctionId> {
+    for scope in &caller.visible_bare_call_scopes {
+        let mut matches = functions.iter().filter(|function| {
+            function.file == caller.file
+                && function.name == call.name
+                && function
+                    .bare_call_scope
+                    .as_ref()
+                    .is_some_and(|target_scope| target_scope == scope)
+        });
+        let Some(function) = matches.next() else {
+            continue;
+        };
+        if matches.next().is_none() {
+            return Some(function.id.clone());
+        }
+        return None;
+    }
+
+    let mut matches = imports
+        .iter()
+        .filter(|binding| binding.file == caller.file)
+        .filter(|binding| binding.local_name == call.name)
+        .flat_map(|binding| {
+            functions.iter().filter(move |function| {
+                function.name == binding.target_name
+                    && function
+                        .bare_call_scope
+                        .as_ref()
+                        .is_some_and(|scope| scope.path.segments.is_empty())
+                    && binding
+                        .target_file_suffixes
+                        .iter()
+                        .any(|suffix| function.file.ends_with(suffix))
+            })
+        });
+    let target = matches.next()?;
+    matches.next().is_none().then(|| target.id.clone())
+}
+
+fn function_summary(functions: &[Function]) -> FunctionSummary {
+    let sorted_functions = sorted_scored_functions(functions);
+    let high_cc_functions = sorted_functions
+        .iter()
+        .filter(|function| function.is_high_cc())
+        .count();
+    let high_cog_functions = sorted_functions
+        .iter()
+        .filter(|function| function.is_high_cog())
+        .count();
+    let high_cc_mass = sorted_functions
+        .iter()
+        .filter(|function| function.is_high_cc())
+        .map(|function| function.cc_mass());
+    let high_cog_mass = sorted_functions
+        .iter()
+        .filter(|function| function.is_high_cog())
+        .map(|function| function.cog_mass());
+
+    FunctionSummary {
+        high_cc_functions,
+        high_cog_functions,
+        total_mass: sum_mass(sorted_functions.iter().map(|function| function.cc_mass())),
+        high_cc_mass: sum_mass(high_cc_mass),
+        total_cog_mass: sum_mass(sorted_functions.iter().map(|function| function.cog_mass())),
+        high_cog_mass: sum_mass(high_cog_mass),
+    }
+}
+
 fn sum_mass(values: impl Iterator<Item = f64>) -> f64 {
     let mut total = 0.0_f64;
     let mut compensation = 0.0_f64;
@@ -168,15 +299,20 @@ fn parse_files(
     disable_sg: bool,
     include_all: bool,
     valid_rule_ids: &BTreeSet<String>,
+    ast_grep_catalog: &AstGrepCatalog,
 ) -> Result<Vec<ParsedFile>, String> {
     let mut parsed_files = Vec::new();
     for file in files {
-        match parse_file(file, disable_sg, include_all, valid_rule_ids) {
+        match parse_file(
+            file,
+            disable_sg,
+            include_all,
+            valid_rule_ids,
+            ast_grep_catalog,
+        ) {
             Ok(parsed) => parsed_files.push(parsed),
-            Err(message) if message.starts_with("directive error: ") => {
-                return Err(message.trim_start_matches("directive error: ").to_string());
-            }
-            Err(message) => {
+            Err(ParseFileError::Directive(message)) => return Err(message),
+            Err(ParseFileError::Parse(message)) => {
                 eprintln!("failed to parse file: {message}");
             }
         }
@@ -184,23 +320,31 @@ fn parse_files(
     Ok(parsed_files)
 }
 
-fn collect_project_facts(parsed_files: &[ParsedFile]) -> ProjectFacts {
+fn collect_project_facts(parsed_files: &mut [ParsedFile]) -> ProjectFacts {
     let mut functions = Vec::new();
     let mut clone_candidates = Vec::new();
     let mut ast_grep_findings = Vec::new();
     let mut ignore_directives = Vec::new();
     let mut boundary_directives = Vec::new();
+    let mut imports = Vec::new();
     let mut total_loc = 0;
     let mut source_lines = Vec::new();
     let mut syntax_counts: BTreeMap<Language, (usize, usize)> = BTreeMap::new();
     for parsed in parsed_files {
         total_loc += parsed.sloc_lines.len();
-        functions.extend(parsed.functions.clone());
-        clone_candidates.extend(parsed.clone_candidates.clone());
-        ast_grep_findings.extend(parsed.ast_grep_findings.clone());
-        ignore_directives.extend(parsed.ignore_directives.clone());
-        boundary_directives.extend(parsed.boundary_directives.clone());
-        source_lines.push(parsed.source_lines.clone());
+        functions.append(&mut parsed.functions);
+        clone_candidates.append(&mut parsed.clone_candidates);
+        ast_grep_findings.append(&mut parsed.ast_grep_findings);
+        ignore_directives.append(&mut parsed.ignore_directives);
+        boundary_directives.append(&mut parsed.boundary_directives);
+        imports.append(&mut parsed.imports);
+        source_lines.push(std::mem::replace(
+            &mut parsed.source_lines,
+            SourceLines {
+                file: parsed.path.clone(),
+                lines: Vec::new(),
+            },
+        ));
         let entry = syntax_counts.entry(parsed.language).or_insert((0, 0));
         entry.0 += 1;
         entry.1 += parsed.node_count;
@@ -212,6 +356,7 @@ fn collect_project_facts(parsed_files: &[ParsedFile]) -> ProjectFacts {
         ast_grep_findings,
         ignore_directives,
         boundary_directives,
+        imports,
         total_loc,
         source_lines,
         syntax_counts,
@@ -223,12 +368,13 @@ fn parse_file(
     disable_sg: bool,
     include_all: bool,
     valid_rule_ids: &BTreeSet<String>,
-) -> Result<ParsedFile, String> {
+    ast_grep_catalog: &AstGrepCatalog,
+) -> Result<ParsedFile, ParseFileError> {
     let source = fs::read_to_string(&file.path)
-        .map_err(|error| format!("{}: {error}", file.path.display()))?;
+        .map_err(|error| ParseFileError::Parse(format!("{}: {error}", file.path.display())))?;
     let lines: Vec<&str> = source.lines().collect();
-    let syntax = parse_syntax(file.language, &source)
-        .map_err(|error| format!("{}: {error}", file.path.display()))?;
+    let syntax = parse_syntax_at_path(file.language, &file.path, &source)
+        .map_err(|error| ParseFileError::Parse(format!("{}: {error}", file.path.display())))?;
     let sloc_lines = syntax.sloc_lines.clone();
     let parsed_directives = parse_source_directives(
         file.language,
@@ -237,7 +383,7 @@ fn parse_file(
         &syntax.comments,
         valid_rule_ids,
     )
-    .map_err(|error| format!("directive error: {error}"))?;
+    .map_err(ParseFileError::Directive)?;
     let functions: Vec<Function> = syntax
         .functions
         .iter()
@@ -255,10 +401,12 @@ fn parse_file(
             )
         })
         .collect();
-    let ast_grep_findings = if disable_sg || file.language != Language::Python {
+    let ast_grep_findings = if disable_sg {
         Vec::new()
+    } else if let Some(language) = ast_grep_language(file.language) {
+        ast_grep_catalog.run_rules(language, &file.path, &source, include_all)
     } else {
-        run_python_rules(&file.path, &source, include_all)?
+        Vec::new()
     };
 
     Ok(ParsedFile {
@@ -270,6 +418,7 @@ fn parse_file(
         ast_grep_findings,
         ignore_directives: parsed_directives.ignores,
         boundary_directives: parsed_directives.boundaries,
+        imports: syntax.imports,
         node_count: syntax.node_count,
         source_lines: SourceLines {
             file: file.path.clone(),
@@ -278,8 +427,8 @@ fn parse_file(
     })
 }
 
-fn valid_rule_ids() -> Result<BTreeSet<String>, String> {
-    let ast_ids: BTreeSet<String> = ast_grep_rule_ids()?.into_iter().collect();
+fn valid_rule_ids(ast_grep_catalog: &AstGrepCatalog) -> Result<BTreeSet<String>, String> {
+    let ast_ids: BTreeSet<String> = ast_grep_catalog.rule_ids().into_iter().collect();
     let structural_ids: BTreeSet<String> = structural_rule_ids()
         .into_iter()
         .map(ToString::to_string)
@@ -298,9 +447,11 @@ fn validate_unique_rule_ids(
     Ok(())
 }
 
-fn apply_count_thresholds(findings: Vec<AstGrepFinding>) -> Result<Vec<AstGrepFinding>, String> {
-    let thresholds = ast_grep_thresholds()?;
-    Ok(apply_threshold_map(findings, &thresholds))
+fn apply_count_thresholds(
+    findings: Vec<AstGrepFinding>,
+    ast_grep_catalog: &AstGrepCatalog,
+) -> Vec<AstGrepFinding> {
+    apply_threshold_map(findings, &ast_grep_catalog.thresholds())
 }
 
 fn apply_threshold_map(
@@ -608,9 +759,9 @@ fn branch(value: i32) -> i32 {
                 "structural_rule_loc": 0,
                 "syntax_by_language": {
                     "python": {"node_count": 6, "tree_count": 1},
-                    "rust": {"node_count": 13, "tree_count": 1},
+                    "rust": {"node_count": 20, "tree_count": 1},
                 },
-                "syntax_node_count": 19,
+                "syntax_node_count": 26,
                 "syntax_tree_count": 2,
                 "total_cog_mass": 0.0,
                 "total_functions": 1,
@@ -710,8 +861,8 @@ fn branch(value: i32) -> i32 {
                 "high_cc_mass": 0.0,
                 "high_cog_functions": 0,
                 "high_cog_mass": 0.0,
-                "structural_rule_findings": 2,
-                "structural_rule_loc": 5,
+                "structural_rule_findings": 1,
+                "structural_rule_loc": 3,
                 "syntax_by_language": {"python": {"node_count": 42, "tree_count": 1}},
                 "syntax_node_count": 42,
                 "syntax_tree_count": 1,
@@ -719,8 +870,8 @@ fn branch(value: i32) -> i32 {
                 "total_functions": 2,
                 "total_loc": 5,
                 "total_mass": 3.146_264_369_941_973,
-                "verbosity": 1.0,
-                "verbosity_flagged_loc": 5,
+                "verbosity": 0.6,
+                "verbosity_flagged_loc": 3,
             }),
         }
     }

@@ -50,59 +50,124 @@ struct RuleText {
     yaml: String,
 }
 
-pub fn run_python_rules(
-    path: &Path,
-    source: &str,
-    include_all: bool,
-) -> Result<Vec<AstGrepFinding>, String> {
-    let rules = load_rules()?;
-    let grep = SupportLang::Python.ast_grep(source);
-    let root = grep.root();
-    let mut findings = Vec::new();
-    for rule in rules {
-        if skip_rule(&rule.severity, include_all) {
-            continue;
-        }
-        for matched in root.find_all(&rule.matcher) {
-            findings.push(AstGrepFinding {
-                rule_id: rule.id.clone(),
-                severity: severity_text(&rule.severity).to_string(),
-                message: rule.get_message(&matched),
-                file: path.to_path_buf(),
-                start_line: matched.start_pos().line() + 1,
-                end_line: matched.end_pos().line() + 1,
-                start_col: matched.start_pos().column(&matched),
-                end_col: matched.end_pos().column(&matched),
-                matched_text: matched.text().to_string(),
-            });
-        }
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RuleDocument {
+    id: String,
+    yaml: String,
+    min_file_count: Option<usize>,
+}
+
+pub struct AstGrepCatalog {
+    rules: Vec<ast_grep_config::RuleConfig<SupportLang>>,
+    documents: Vec<RuleDocument>,
+}
+
+impl AstGrepCatalog {
+    pub fn load() -> Result<Self, String> {
+        Self::from_texts(bundled_and_extra_rule_texts()?)
     }
-    findings.sort_by(|left, right| {
-        (
-            left.file.as_os_str(),
-            left.start_line,
-            left.end_line,
-            left.start_col,
-            left.end_col,
-            left.rule_id.as_str(),
-            left.severity.as_str(),
-            left.message.as_str(),
-            left.matched_text.as_str(),
-        )
-            .cmp(&(
-                right.file.as_os_str(),
-                right.start_line,
-                right.end_line,
-                right.start_col,
-                right.end_col,
-                right.rule_id.as_str(),
-                right.severity.as_str(),
-                right.message.as_str(),
-                right.matched_text.as_str(),
-            ))
-    });
-    findings.dedup_by(same_finding);
-    Ok(findings)
+
+    fn from_texts(texts: Vec<RuleText>) -> Result<Self, String> {
+        let globals = GlobalRules::default();
+        let mut rules = Vec::new();
+        let mut documents = Vec::new();
+        let mut seen = BTreeSet::new();
+        for text in texts {
+            extend_rules(&mut rules, &text, &globals)?;
+            for document in rule_documents(&text) {
+                if !seen.insert(document.id.clone()) {
+                    return Err(format!("duplicate rule id: {}", document.id));
+                }
+                documents.push(document);
+            }
+        }
+        Ok(Self { rules, documents })
+    }
+
+    pub fn rule_ids(&self) -> Vec<String> {
+        self.documents
+            .iter()
+            .map(|document| document.id.clone())
+            .collect()
+    }
+
+    pub fn thresholds(&self) -> BTreeMap<String, usize> {
+        self.documents
+            .iter()
+            .filter_map(|document| {
+                document
+                    .min_file_count
+                    .map(|threshold| (document.id.clone(), threshold))
+            })
+            .collect()
+    }
+
+    pub fn rule_document(&self, rule_id: &str) -> Option<String> {
+        self.documents
+            .iter()
+            .find(|document| document.id == rule_id)
+            .map(|document| document.yaml.clone())
+    }
+
+    pub fn run_rules(
+        &self,
+        language: SupportLang,
+        path: &Path,
+        source: &str,
+        include_all: bool,
+    ) -> Vec<AstGrepFinding> {
+        let grep = language.ast_grep(source);
+        let root = grep.root();
+        let mut findings = Vec::new();
+        for rule in &self.rules {
+            if skip_rule(&rule.severity, include_all) {
+                continue;
+            }
+            for matched in root.find_all(&rule.matcher) {
+                findings.push(AstGrepFinding {
+                    rule_id: rule.id.clone(),
+                    severity: severity_text(&rule.severity).to_string(),
+                    message: rule.get_message(&matched),
+                    file: path.to_path_buf(),
+                    start_line: matched.start_pos().line() + 1,
+                    end_line: matched.end_pos().line() + 1,
+                    start_col: matched.start_pos().column(&matched),
+                    end_col: matched.end_pos().column(&matched),
+                    matched_text: matched.text().to_string(),
+                });
+            }
+        }
+        findings.sort_by(|left, right| {
+            (
+                left.file.as_os_str(),
+                left.start_line,
+                left.end_line,
+                left.start_col,
+                left.end_col,
+                left.rule_id.as_str(),
+                left.severity.as_str(),
+                left.message.as_str(),
+                left.matched_text.as_str(),
+            )
+                .cmp(&(
+                    right.file.as_os_str(),
+                    right.start_line,
+                    right.end_line,
+                    right.start_col,
+                    right.end_col,
+                    right.rule_id.as_str(),
+                    right.severity.as_str(),
+                    right.message.as_str(),
+                    right.matched_text.as_str(),
+                ))
+        });
+        findings.dedup_by(same_finding);
+        findings
+    }
+}
+
+pub fn ast_grep_rule_document(rule_id: &str) -> Result<Option<String>, String> {
+    Ok(AstGrepCatalog::load()?.rule_document(rule_id))
 }
 
 fn same_finding(left: &mut AstGrepFinding, right: &mut AstGrepFinding) -> bool {
@@ -117,59 +182,6 @@ fn same_finding(left: &mut AstGrepFinding, right: &mut AstGrepFinding) -> bool {
         && left.matched_text == right.matched_text
 }
 
-pub fn ast_grep_rule_ids() -> Result<Vec<String>, String> {
-    let texts = bundled_and_extra_rule_texts()?;
-    rule_ids_from_texts(&texts)
-}
-
-fn rule_ids_from_texts(texts: &[RuleText]) -> Result<Vec<String>, String> {
-    validate_rule_texts(texts)?;
-    let mut ids = Vec::new();
-    let mut seen = BTreeSet::new();
-    for text in texts {
-        for document in split_yaml_documents(&text.yaml) {
-            let Some(rule_id) = document_rule_id(document) else {
-                continue;
-            };
-            if !seen.insert(rule_id.to_string()) {
-                return Err(format!("duplicate rule id: {rule_id}"));
-            }
-            ids.push(rule_id.to_string());
-        }
-    }
-    Ok(ids)
-}
-
-pub fn ast_grep_thresholds() -> Result<BTreeMap<String, usize>, String> {
-    let texts = bundled_and_extra_rule_texts()?;
-    validate_rule_texts(&texts)?;
-    let mut thresholds = BTreeMap::new();
-    for text in &texts {
-        for document in split_yaml_documents(&text.yaml) {
-            let Some(rule_id) = document_rule_id(document) else {
-                continue;
-            };
-            if let Some(threshold) = document_min_file_count(document) {
-                thresholds.insert(rule_id.to_string(), threshold);
-            }
-        }
-    }
-    Ok(thresholds)
-}
-
-pub fn ast_grep_rule_document(rule_id: &str) -> Result<Option<String>, String> {
-    let texts = bundled_and_extra_rule_texts()?;
-    validate_rule_texts(&texts)?;
-    for text in &texts {
-        for document in split_yaml_documents(&text.yaml) {
-            if document_rule_id(document).is_some_and(|id| id == rule_id) {
-                return Ok(Some(document.trim().to_string()));
-            }
-        }
-    }
-    Ok(None)
-}
-
 fn document_min_file_count(document: &str) -> Option<usize> {
     for line in document.lines() {
         let trimmed = line.trim();
@@ -181,15 +193,6 @@ fn document_min_file_count(document: &str) -> Option<usize> {
         }
     }
     None
-}
-
-fn load_rules() -> Result<Vec<ast_grep_config::RuleConfig<SupportLang>>, String> {
-    let globals = GlobalRules::default();
-    let mut rules = Vec::new();
-    for text in bundled_and_extra_rule_texts()? {
-        extend_rules(&mut rules, &text, &globals)?;
-    }
-    Ok(rules)
 }
 
 fn bundled_and_extra_rule_texts() -> Result<Vec<RuleText>, String> {
@@ -235,6 +238,21 @@ fn document_rule_id(document: &str) -> Option<&str> {
     })
 }
 
+fn rule_documents(text: &RuleText) -> Vec<RuleDocument> {
+    let mut documents = Vec::new();
+    for document in split_yaml_documents(&text.yaml) {
+        let Some(rule_id) = document_rule_id(document) else {
+            continue;
+        };
+        documents.push(RuleDocument {
+            id: rule_id.to_string(),
+            yaml: document.trim().to_string(),
+            min_file_count: document_min_file_count(document),
+        });
+    }
+    documents
+}
+
 fn extend_rules(
     rules: &mut Vec<ast_grep_config::RuleConfig<SupportLang>>,
     text: &RuleText,
@@ -243,16 +261,6 @@ fn extend_rules(
     let mut parsed = from_yaml_string::<SupportLang>(&text.yaml, globals)
         .map_err(|error| format!("failed to parse ast-grep rule file {}: {error}", text.name))?;
     rules.append(&mut parsed);
-    Ok(())
-}
-
-fn validate_rule_texts(texts: &[RuleText]) -> Result<(), String> {
-    let globals = GlobalRules::default();
-    for text in texts {
-        let _ = from_yaml_string::<SupportLang>(&text.yaml, &globals).map_err(|error| {
-            format!("failed to parse ast-grep rule file {}: {error}", text.name)
-        })?;
-    }
     Ok(())
 }
 
@@ -271,15 +279,15 @@ const fn severity_text(severity: &Severity) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        RuleText, ast_grep_rule_document, extra_rule_text, rule_ids_from_texts, run_python_rules,
-        validate_rule_texts,
-    };
+    use super::{AstGrepCatalog, RuleText, ast_grep_rule_document, extra_rule_text};
     use crate::test_support::{test_dir, write};
+    use ast_grep_language::SupportLang;
 
     #[test]
     fn bundled_python_rules_run_in_process_and_can_be_skipped_by_callers() {
-        let findings = run_python_rules(
+        let catalog = AstGrepCatalog::load().expect("catalog should load");
+        let findings = catalog.run_rules(
+            SupportLang::Python,
             std::path::Path::new("sample.py"),
             r"
 def item_names(items):
@@ -287,8 +295,7 @@ def item_names(items):
         print(items[index])
 ",
             false,
-        )
-        .expect("rules should run");
+        );
 
         assert!(
             findings
@@ -320,7 +327,9 @@ rule:
             .to_string(),
         }];
 
-        let error = rule_ids_from_texts(&texts).expect_err("duplicate ids should fail");
+        let Err(error) = AstGrepCatalog::from_texts(texts) else {
+            panic!("duplicate ids should fail");
+        };
 
         assert_eq!(error, "duplicate rule id: env-duplicate-rule");
     }
@@ -336,7 +345,9 @@ rule:
         let invalid = root.join("invalid-rules.yaml");
         write(&invalid, ":\n");
         let text = extra_rule_text(&invalid).expect("invalid yaml should still be readable");
-        let invalid_error = validate_rule_texts(&[text]).expect_err("invalid yaml should fail");
+        let Err(invalid_error) = AstGrepCatalog::from_texts(vec![text]) else {
+            panic!("invalid yaml should fail");
+        };
         assert!(invalid_error.contains("failed to parse ast-grep rule file"));
         assert!(invalid_error.contains("invalid-rules.yaml"));
     }

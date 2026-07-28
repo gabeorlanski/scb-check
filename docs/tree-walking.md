@@ -4,16 +4,21 @@ Tree walking turns already-read source into shared facts that scoring, clone det
 
 ## Boundaries
 
-Parsing does not discover files or read from disk. The CLI boundary discovers Python and Rust source files, reads each file once, then calls the parser with `Language` plus source text.
+Parsing does not discover files or read from disk. The CLI boundary discovers Python and Rust source files, reads each file once, then calls the parser with `Language`, the source path, and source text.
 
 The parser emits:
 
 - parser-derived `SLOC` lines,
 - tree-sitter comments,
-- function spans, names, signatures, complexity values, maximum nesting, and clone fingerprints,
+- function spans, names, visibility, semantic identity, parser-derived structural facts, complexity values, maximum nesting, and clone fingerprints,
+- conservative Python import and Rust use bindings for bare project calls,
 - syntax node counts.
 
 Structural rules consume shared facts, not language-native tree-sitter nodes. Add new shared facts only when a scoring path or real rule needs them.
+
+The intended semantic model is deliberately small. Shared facts should capture stable, language-neutral observations such as spans, function boundaries, complexity, nesting, simple-return body facts, typed bare-call scope facts, and conservative resolved call-site relationships. They are not a general name-resolution layer. Bare names can collide across scopes, imports, aliases, methods, and languages, so structural rules must not treat matching identifier text as proof that two references point at the same symbol. When a rule needs stronger evidence, add the narrow semantic fact that proves that relationship, or keep the rule conservative.
+
+Project assembly builds a first-class `CallGraph` from resolved `CallSite` targets. Structural rules that need caller/callee locations should consume that graph instead of rescanning every function or rebuilding call indexes locally. The graph is backed by `petgraph`, but rules use the repo's domain wrapper so graph storage can change without changing rule APIs.
 
 ## Parse flow
 
@@ -26,9 +31,10 @@ Structural rules consume shared facts, not language-native tree-sitter nodes. Ad
 `analyze.rs`
     │
     ├─ read source
-    ├─ call `parse_syntax(language, source)`
-    ├─ parse source directives from language comment nodes
+    ├─ call `parse_syntax_at_path(language, path, source)`
+    ├─ parse source directives from normalized language comment facts
     ├─ build function facts and clone candidates
+    ├─ resolve conservative local and explicitly imported call targets
     └─ collect project-level scoring inputs
 ```
 
@@ -65,13 +71,17 @@ Python `function_definition` and Rust `function_item` nodes become shared functi
 Function facts include:
 
 - source file and language,
-- name, signature, start line, and end line,
+- stable function identity from file plus qualified name,
+- language-lowered visibility,
+- display name, start line, and end line,
 - `SLOC` within the function span,
 - cyclomatic complexity,
 - cognitive complexity,
 - maximum nesting,
-- conservative bare call sites,
-- body shape for structural rules,
+- conservative bare call sites with parser-derived nesting,
+- typed bare-call scope facts for resolving local call relationships,
+- resolved local or explicitly imported call targets when the project-level relationship is unique,
+- simple-return body facts for structural rules,
 - normalized clone fingerprint.
 
 Cyclomatic and cognitive complexity are parser-derived. Mass totals are scored from functions sorted by file, start line, and name, then summed with compensated float accumulation for stable JSON calculations.
@@ -96,7 +106,7 @@ Supported directives:
 - `# scbc ignore[rule-id]` or `// scbc ignore[rule-id]`,
 - `# scbc boundary` or `// scbc boundary`.
 
-Ignore directives target the same line when they follow code, or the next code line when standalone. Boundary directives suppress ast-grep findings inside the containing function. `--include-all` shows ignored and boundary-suppressed findings.
+Ignore directives target the same line when they follow code, or the next code line when standalone. Boundary directives suppress ast-grep findings inside the containing function. Invalid directives always fail the run with exit code `2`. `--include-all` shows ignored and boundary-suppressed findings, but it does not make invalid directives valid.
 
 ## Adding Syntax Support
 
@@ -105,4 +115,5 @@ When adding or changing parser support:
 - keep IO and path coercion outside parser logic,
 - add shared facts only for a concrete scoring or rule need,
 - keep structural rules language-agnostic over shared facts,
+- keep structural rules off bare-name matching unless another fact makes the relationship semantically safe,
 - update parser, scoring, directive, clone, and JSON regression tests for any scoring-sensitive behavior.

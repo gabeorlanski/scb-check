@@ -1,8 +1,17 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use serde::Deserialize;
 use toml::Value;
 use toml::map::Map;
+
+const DEFAULT_CONTEXT_LINES: usize = 1;
+const DEFAULT_MAX_CALL_SITES: usize = 2;
+const DEFAULT_MAX_FUNCTION_SLOC: usize = 5;
+const DEFAULT_MAX_INLINE_CALLER_SLOC: usize = 50;
+const DEFAULT_MAX_INLINE_CALLER_COMPLEXITY: usize = 10;
+const DEFAULT_MAX_INLINE_CALLER_COGNITIVE_COMPLEXITY: usize = 10;
+const DEFAULT_MAX_INLINE_CALL_NESTING: usize = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
@@ -23,16 +32,60 @@ pub struct LowUseShortFunctionSettings {
     pub max_inline_call_nesting: usize,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+struct RawScbConfig {
+    exclude: Vec<String>,
+    context: usize,
+    low_use_short_function: RawLowUseShortFunctionSettings,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+struct RawLowUseShortFunctionSettings {
+    enabled: bool,
+    max_call_sites: usize,
+    max_function_sloc: usize,
+    max_inline_caller_sloc: usize,
+    max_inline_caller_complexity: usize,
+    max_inline_caller_cognitive_complexity: usize,
+    max_inline_call_nesting: usize,
+}
+
+impl Default for RawScbConfig {
+    fn default() -> Self {
+        Self {
+            exclude: Vec::new(),
+            context: DEFAULT_CONTEXT_LINES,
+            low_use_short_function: RawLowUseShortFunctionSettings::default(),
+        }
+    }
+}
+
+impl Default for RawLowUseShortFunctionSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_call_sites: DEFAULT_MAX_CALL_SITES,
+            max_function_sloc: DEFAULT_MAX_FUNCTION_SLOC,
+            max_inline_caller_sloc: DEFAULT_MAX_INLINE_CALLER_SLOC,
+            max_inline_caller_complexity: DEFAULT_MAX_INLINE_CALLER_COMPLEXITY,
+            max_inline_caller_cognitive_complexity: DEFAULT_MAX_INLINE_CALLER_COGNITIVE_COMPLEXITY,
+            max_inline_call_nesting: DEFAULT_MAX_INLINE_CALL_NESTING,
+        }
+    }
+}
+
 impl Default for LowUseShortFunctionSettings {
     fn default() -> Self {
         Self {
             enabled: false,
-            max_call_sites: 2,
-            max_function_sloc: 5,
-            max_inline_caller_sloc: 50,
-            max_inline_caller_complexity: 10,
-            max_inline_caller_cognitive_complexity: 10,
-            max_inline_call_nesting: 3,
+            max_call_sites: DEFAULT_MAX_CALL_SITES,
+            max_function_sloc: DEFAULT_MAX_FUNCTION_SLOC,
+            max_inline_caller_sloc: DEFAULT_MAX_INLINE_CALLER_SLOC,
+            max_inline_caller_complexity: DEFAULT_MAX_INLINE_CALLER_COMPLEXITY,
+            max_inline_caller_cognitive_complexity: DEFAULT_MAX_INLINE_CALLER_COGNITIVE_COMPLEXITY,
+            max_inline_call_nesting: DEFAULT_MAX_INLINE_CALL_NESTING,
         }
     }
 }
@@ -42,7 +95,7 @@ impl Config {
         Self {
             exclude: Vec::new(),
             base_dir: cwd.to_path_buf(),
-            context_lines: 1,
+            context_lines: DEFAULT_CONTEXT_LINES,
             low_use_short_function: LowUseShortFunctionSettings::default(),
         }
     }
@@ -84,7 +137,7 @@ fn config_file_in(directory: &Path) -> Result<Option<PathBuf>, String> {
     }
 
     let pyproject = directory.join("pyproject.toml");
-    if pyproject.is_file() && has_config(&pyproject)? {
+    if pyproject.is_file() && pyproject_has_compatible_config(&pyproject)? {
         return Ok(Some(pyproject));
     }
 
@@ -99,10 +152,10 @@ fn next_config_parent(directory: &Path) -> Option<PathBuf> {
     (parent != directory).then(|| parent.to_path_buf())
 }
 
-fn has_config(path: &Path) -> Result<bool, String> {
+fn pyproject_has_compatible_config(path: &Path) -> Result<bool, String> {
     let raw = read_config(path)?;
     let document = parse_toml(path, &raw)?;
-    Ok(table_at(&document, &["tool", "scb-check"]).is_some()
+    Ok(value_at(&document, &["tool", "scb-check"]).is_some()
         || table_at(&document, &["tool", "ruff"]).is_some()
         || table_at(&document, &["tool", "ty", "src"]).is_some())
 }
@@ -116,97 +169,81 @@ fn parse_config_file(path: &Path) -> Result<Config, String> {
         .canonicalize()
         .map_err(|error| format!("failed to resolve config directory: {error}"))?;
 
-    if path.file_name().and_then(|name| name.to_str()) != Some("pyproject.toml") {
-        return parse_scb_table(
-            path,
-            document.as_table(),
-            table_at(&document, &["low-use-short-function"]),
-            base_dir,
-        );
+    if !is_pyproject(path) {
+        return parse_scb_config(path, document, base_dir);
     }
 
-    let scb_table = table_at(&document, &["tool", "scb-check"]);
-    let low_use_table = table_at(&document, &["tool", "scb-check", "low-use-short-function"]);
-    let mut config = if scb_table.is_some() || low_use_table.is_some() {
-        parse_scb_table(path, scb_table, low_use_table, base_dir)?
-    } else {
-        Config {
-            exclude: Vec::new(),
-            base_dir,
-            context_lines: 1,
-            low_use_short_function: LowUseShortFunctionSettings::default(),
-        }
-    };
-    config.exclude.extend(tool_excludes(&document));
+    let mut config = parse_pyproject_config(path, &document, base_dir)?;
+    config.exclude.extend(python_tool_excludes(&document));
     dedupe(&mut config.exclude);
     Ok(config)
 }
 
-fn parse_scb_table(
+fn is_pyproject(path: &Path) -> bool {
+    path.file_name().and_then(|name| name.to_str()) == Some("pyproject.toml")
+}
+
+fn parse_pyproject_config(
     path: &Path,
-    table: Option<&Map<String, Value>>,
-    low_use_table: Option<&Map<String, Value>>,
+    document: &Value,
     base_dir: PathBuf,
 ) -> Result<Config, String> {
-    let allowed = ["exclude", "context"];
-    for key in table_keys(table) {
-        if !allowed.contains(&key.as_str()) && !key.starts_with("low-use-short-function") {
-            return Err(format!("{}: unknown key: {key}", path.display()));
-        }
+    if let Some(scb_value) = value_at(document, &["tool", "scb-check"]) {
+        parse_scb_config(path, scb_value.clone(), base_dir)
+    } else {
+        Ok(Config {
+            exclude: Vec::new(),
+            base_dir,
+            context_lines: DEFAULT_CONTEXT_LINES,
+            low_use_short_function: LowUseShortFunctionSettings::default(),
+        })
     }
+}
 
-    let exclude = string_list_value(table, "exclude")?.map_or_else(Vec::new, norm_patterns);
-    let context_lines = int_value(table, "context")?.unwrap_or(1);
-    let low_use_short_function = low_use_settings(path, low_use_table)?;
+fn parse_scb_config(path: &Path, value: Value, base_dir: PathBuf) -> Result<Config, String> {
+    let raw = value
+        .try_into::<RawScbConfig>()
+        .map_err(|error| format!("{}: failed to parse config: {error}", path.display()))?;
+    let low_use_short_function = low_use_settings(&raw.low_use_short_function)?;
     Ok(Config {
-        exclude,
+        exclude: norm_patterns(raw.exclude),
         base_dir,
-        context_lines,
+        context_lines: raw.context,
         low_use_short_function,
     })
 }
 
 fn low_use_settings(
-    path: &Path,
-    table: Option<&Map<String, Value>>,
+    raw: &RawLowUseShortFunctionSettings,
 ) -> Result<LowUseShortFunctionSettings, String> {
-    let Some(table) = table else {
-        return Ok(LowUseShortFunctionSettings::default());
-    };
-    let allowed = [
-        "enabled",
-        "max-call-sites",
-        "max-function-sloc",
-        "max-inline-caller-sloc",
-        "max-inline-caller-complexity",
-        "max-inline-caller-cognitive-complexity",
-        "max-inline-call-nesting",
-    ];
-    for key in table_keys(Some(table)) {
-        if !allowed.contains(&key.as_str()) {
-            return Err(format!(
-                "{}: unknown low-use-short-function key: {key}",
-                path.display()
-            ));
-        }
-    }
     Ok(LowUseShortFunctionSettings {
-        enabled: bool_value(table, "enabled")?.unwrap_or(false),
-        max_call_sites: min_int_value(table, "max-call-sites", 2, 1)?,
-        max_function_sloc: min_int_value(table, "max-function-sloc", 5, 1)?,
-        max_inline_caller_sloc: min_int_value(table, "max-inline-caller-sloc", 50, 1)?,
-        max_inline_caller_complexity: min_int_value(table, "max-inline-caller-complexity", 10, 1)?,
+        enabled: raw.enabled,
+        max_call_sites: min_int_value("max-call-sites", raw.max_call_sites, 1)?,
+        max_function_sloc: min_int_value("max-function-sloc", raw.max_function_sloc, 1)?,
+        max_inline_caller_sloc: min_int_value(
+            "max-inline-caller-sloc",
+            raw.max_inline_caller_sloc,
+            1,
+        )?,
+        max_inline_caller_complexity: min_int_value(
+            "max-inline-caller-complexity",
+            raw.max_inline_caller_complexity,
+            1,
+        )?,
         max_inline_caller_cognitive_complexity: min_int_value(
-            table,
             "max-inline-caller-cognitive-complexity",
-            10,
+            raw.max_inline_caller_cognitive_complexity,
             0,
         )?,
-        max_inline_call_nesting: min_int_value(table, "max-inline-call-nesting", 3, 0)?,
+        max_inline_call_nesting: min_int_value(
+            "max-inline-call-nesting",
+            raw.max_inline_call_nesting,
+            0,
+        )?,
     })
 }
 
-fn tool_excludes(document: &Value) -> Vec<String> {
+fn python_tool_excludes(document: &Value) -> Vec<String> {
     let mut patterns = Vec::new();
     if let Some(ruff) = table_at(document, &["tool", "ruff"]) {
         if let Some(exclude) = tool_string_list_value(ruff, "exclude") {
@@ -234,39 +271,15 @@ fn parse_toml(path: &Path, raw: &str) -> Result<Value, String> {
 }
 
 fn table_at<'a>(document: &'a Value, path: &[&str]) -> Option<&'a Map<String, Value>> {
+    value_at(document, path)?.as_table()
+}
+
+fn value_at<'a>(document: &'a Value, path: &[&str]) -> Option<&'a Value> {
     let mut current = document;
     for key in path {
         current = current.get(*key)?;
     }
-    current.as_table()
-}
-
-fn table_keys(table: Option<&Map<String, Value>>) -> Vec<String> {
-    table
-        .into_iter()
-        .flat_map(|table| table.keys().cloned())
-        .collect()
-}
-
-fn string_list_value(
-    table: Option<&Map<String, Value>>,
-    key: &str,
-) -> Result<Option<Vec<String>>, String> {
-    let Some(value) = table.and_then(|table| table.get(key)) else {
-        return Ok(None);
-    };
-    let Some(array) = value.as_array() else {
-        return Err(format!("{key} must be a list"));
-    };
-    array
-        .iter()
-        .map(|item| {
-            item.as_str()
-                .map(ToString::to_string)
-                .ok_or_else(|| format!("{key} must be a list of strings"))
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .map(Some)
+    Some(current)
 }
 
 fn tool_string_list_value(table: &Map<String, Value>, key: &str) -> Option<Vec<String>> {
@@ -277,39 +290,11 @@ fn tool_string_list_value(table: &Map<String, Value>, key: &str) -> Option<Vec<S
         .collect()
 }
 
-fn int_value(table: Option<&Map<String, Value>>, key: &str) -> Result<Option<usize>, String> {
-    let Some(value) = table.and_then(|table| table.get(key)) else {
-        return Ok(None);
-    };
-    let Some(value) = value.as_integer() else {
-        return Err(format!("{key} must be an integer"));
-    };
-    usize::try_from(value)
-        .map(Some)
-        .map_err(|_| format!("{key} must be an integer"))
-}
-
-fn min_int_value(
-    table: &Map<String, Value>,
-    key: &str,
-    default: usize,
-    minimum: usize,
-) -> Result<usize, String> {
-    let value = int_value(Some(table), key)?.unwrap_or(default);
+fn min_int_value(key: &str, value: usize, minimum: usize) -> Result<usize, String> {
     if value < minimum {
         return Err(format!("{key} must be >= {minimum}"));
     }
     Ok(value)
-}
-
-fn bool_value(table: &Map<String, Value>, key: &str) -> Result<Option<bool>, String> {
-    let Some(value) = table.get(key) else {
-        return Ok(None);
-    };
-    value
-        .as_bool()
-        .map(Some)
-        .ok_or_else(|| format!("{key} must be a boolean"))
 }
 
 fn norm_patterns(patterns: Vec<String>) -> Vec<String> {
@@ -363,6 +348,14 @@ mod tests {
     use super::load_config;
     use crate::test_support::{test_dir, write};
 
+    fn config_error_for(content: &str) -> String {
+        let root = test_dir();
+        let config_path = root.join("scb-check.toml");
+        write(&config_path, content);
+
+        load_config(Some(&config_path), &root).expect_err("config should fail")
+    }
+
     #[test]
     fn pyproject_tool_excludes_and_low_use_settings_are_supported() {
         let root = test_dir();
@@ -385,5 +378,34 @@ enabled = true
 
         assert!(config.low_use_short_function.enabled);
         assert_eq!(config.exclude, ["vendor/**", "fixtures/**"]);
+    }
+
+    #[test]
+    fn config_rejects_unknown_keys() {
+        for (content, unknown_key) in [
+            (
+                "low-use-short-function-extra = 7\n",
+                "low-use-short-function-extra",
+            ),
+            (
+                "[low-use-short-function]\nenabled = true\nmax-call-sites-extra = 7\n",
+                "max-call-sites-extra",
+            ),
+        ] {
+            let error = config_error_for(content);
+
+            assert!(error.contains(unknown_key));
+        }
+    }
+
+    #[test]
+    fn explicit_pyproject_rejects_non_table_scb_check_config() {
+        let root = test_dir();
+        let config_path = root.join("pyproject.toml");
+        write(&config_path, "tool.scb-check = \"bad\"\n");
+
+        let error = load_config(Some(&config_path), &root).expect_err("invalid config should fail");
+
+        assert!(error.contains("failed to parse config"));
     }
 }

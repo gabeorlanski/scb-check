@@ -1,3 +1,3 @@
-fn value() -> i32 {
-    1
+fn value(input: i32) -> i32 {
+    input + 1
 }

@@ -21,6 +21,7 @@ Keep these docs up to date. When behavior, scoring, CLI contracts, source direct
 - **ast-grep runs in process.** Bundled Python ast-grep rules are loaded through Rust ast-grep crates; no external `sg` executable is required for the Rust path.
 - **Verbosity is a union**, not a sum. Clone lines union ast-grep lines union structural-rule lines per file, intersected with `SLOC` lines. Do not double-count.
 - **Rust and Python source are both parsed by tree-sitter.** Python ast-grep rules currently apply only to Python files; shared structural rules run over lowered Python/Rust facts.
+- **Language adapters own language-specific syntax and conventions.** Inside `languages/<language>/`, prefer tree-sitter facts over source text scans for syntax-derived facts. Outside language parsing, core analysis and `rules/` must consume language-agnostic IR facts only, never language-native tree-sitter nodes, syntax kinds, comment markers, visibility conventions, or naming conventions.
 - **Avoid Pythonic ports in core logic.** Do not string-scan syntax that tree-sitter can provide, do not model control flow with stringly typed errors, and do not clone owned records just to mimic Python list/dict pipelines.
 
 ## Workflow
@@ -70,7 +71,7 @@ Tests are currently colocated with Rust modules. Keep new tests close to the beh
 
 - Boundaries handle coercion and normalization. Core analysis should consume already-validated, strongly typed values.
 - Prefer typed errors internally; convert to user-facing strings and exit codes at the CLI boundary.
-- Prefer tree-sitter node facts over ad hoc source string parsing.
+- In language adapters, derive syntax facts from tree-sitter nodes rather than ad hoc source string parsing; outside adapters, consume lowered language-agnostic facts.
 - Move owned values through pipeline stages where possible. Borrow when reading, clone only when ownership must be duplicated.
 - Use enums/newtypes for closed sets such as severities, languages, output formats, and rule identifiers when behavior depends on those values.
 - Keep scoring-sensitive invariants centralized in analysis/reporting code.

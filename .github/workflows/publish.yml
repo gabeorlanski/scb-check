@@ -14,7 +14,8 @@ jobs:
   publish:
     name: Publish package
     if: ${{ !github.event.release.prerelease }}
-    runs-on: ubuntu-latest
+    # Pin the glibc build target so the generated PEP 600 tag remains stable.
+    runs-on: ubuntu-22.04
     environment: pypi
 
     permissions:
@@ -89,18 +90,17 @@ jobs:
       - name: Install locked dependencies
         run: uv sync --locked --all-groups --python 3.13
 
-      - name: Verify exported hash locks are current
+      - name: Run Rust quality gate
         run: |
-          uv export --format requirements.txt --no-dev --no-emit-project --frozen --output-file requirements.lock
-          uv export --format requirements.txt --all-groups --no-emit-project --frozen --output-file requirements-dev.lock
-          git diff --exit-code -- requirements.lock requirements-dev.lock
+          cargo fmt --check
+          cargo test --all --all-features
+          cargo clippy --all --all-targets --all-features -- -D warnings
+          cargo run -p scb-check -- check .
 
-      - name: Run quality gate
+      - name: Run packaging quality gate
         run: |
-          uv run ruff check .
-          uv run ty check .
-          uv run pytest
-          uv run scb-check check .
+          uv run ruff check hatch_build.py
+          uv run ty check hatch_build.py
           uv run vulture
 
       - name: Build package
@@ -130,21 +130,23 @@ jobs:
           if duplicates:
               raise SystemExit(f"wheel contains duplicate entries: {duplicates}")
 
-          rule_files = [
+          scripts = [
               name
               for name in names
-              if name.startswith("scb_check/resources/slop_rules/")
-              and name.endswith(".yaml")
+              if name.endswith(".data/scripts/scb-check")
           ]
-          if len(rule_files) != 8:
-              raise SystemExit(f"expected 8 bundled rule files, found {len(rule_files)}")
+          if len(scripts) != 1:
+              raise SystemExit(f"expected one compiled scb-check script, found {scripts}")
+          if "-manylinux_" not in wheels[0].name:
+              raise SystemExit(
+                  f"expected a glibc-compatible manylinux wheel, found {wheels[0].name}"
+              )
           PY
 
       - name: Smoke-test wheel install
         run: |
-          uv venv --seed --python 3.13 .smoke-venv
-          .smoke-venv/bin/python -m pip install --require-hashes -r requirements.lock
-          .smoke-venv/bin/python -m pip install --no-deps dist/*.whl
+          uv venv --python 3.13 .smoke-venv
+          uv pip install --python .smoke-venv/bin/python --no-deps dist/*.whl
           .smoke-venv/bin/scb-check --help
 
       - name: Publish to PyPI

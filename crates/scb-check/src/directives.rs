@@ -107,8 +107,12 @@ pub fn filter_ast_grep_findings(
     ignores: &[IgnoreDirective],
     boundaries: &[BoundaryDirective],
     functions: &[Function],
+    include_all: bool,
 ) -> Result<Vec<AstGrepFinding>, String> {
     let boundary_ranges = boundary_ranges(boundaries, functions)?;
+    if include_all {
+        return Ok(findings);
+    }
     Ok(findings
         .into_iter()
         .filter(|finding| !is_ignored(&finding.file, finding.start_line, &finding.rule_id, ignores))
@@ -127,21 +131,42 @@ pub fn filter_structural_findings(
 }
 
 fn code_lines(lines: &[&str], comments: &[CommentSpan]) -> BTreeSet<usize> {
-    let comment_by_line = comments
-        .iter()
-        .map(|comment| (comment.line, comment.column))
-        .collect::<std::collections::BTreeMap<_, _>>();
+    let mut comment_intervals = std::collections::BTreeMap::<usize, Vec<(usize, usize)>>::new();
+    for comment in comments {
+        for line in comment.line..=comment.end_line {
+            let start = if line == comment.line {
+                comment.column
+            } else {
+                0
+            };
+            let end = if line == comment.end_line {
+                comment.end_column
+            } else {
+                usize::MAX
+            };
+            comment_intervals
+                .entry(line)
+                .or_default()
+                .push((start, end));
+        }
+    }
     lines
         .iter()
         .enumerate()
         .filter_map(|(index, line)| {
             let line_number = index + 1;
-            let code = comment_by_line
+            let intervals = comment_intervals
                 .get(&line_number)
-                .and_then(|column| line.get(..*column))
-                .unwrap_or(line)
-                .trim();
-            (!code.is_empty()).then_some(index + 1)
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            let mut cursor = 0;
+            let has_code = intervals.iter().any(|(start, end)| {
+                let bounded_start = (*start).min(line.len());
+                let before = line[cursor..bounded_start].trim();
+                cursor = cursor.max((*end).min(line.len()));
+                !before.is_empty()
+            }) || !line[cursor..].trim().is_empty();
+            has_code.then_some(line_number)
         })
         .collect()
 }
@@ -330,7 +355,7 @@ def noisy(items):
         print(items[index])
 
 # scbc ignore[trivial-wrapper]
-def identity(value):
+def _identity(value):
     return value
 ",
         );
@@ -381,19 +406,32 @@ def noisy(items):
     }
 
     #[test]
-    fn invalid_source_directive_is_usage_error() {
-        let root = test_dir();
-        write(
-            &root.join("sample.py"),
-            r"
+    fn invalid_source_directives_are_usage_errors_even_with_include_all() {
+        for (source, include_all, expected) in [
+            (
+                r"
 # scbc ignore[not-a-rule]
 value = 1
 ",
-        );
+                false,
+                "unknown rule id: not-a-rule",
+            ),
+            (
+                r"
+# scbc boundary
+value = 1
+",
+                true,
+                "scbc boundary must be inside a function body",
+            ),
+        ] {
+            let root = test_dir();
+            write(&root.join("sample.py"), source);
+            let error =
+                analyze_dir(&root, false, include_all, None).expect_err("directive should fail");
 
-        let error = analyze_dir(&root, false, false, None).expect_err("directive should fail");
-
-        assert!(error.contains("unknown rule id: not-a-rule"));
+            assert!(error.contains(expected));
+        }
     }
 
     #[test]
@@ -417,6 +455,22 @@ def identity(value):
             "sample.rs",
             r"
 // scbc ignore[trivial-wrapper]
+fn identity(value: i32) -> i32 {
+    value
+}
+",
+        );
+    }
+
+    #[test]
+    fn rust_ignore_skips_every_line_of_a_multiline_block_comment() {
+        assert_source_has_no_findings(
+            "sample.rs",
+            r"
+// scbc ignore[trivial-wrapper]
+/* explanatory comment
+ * continued explanation
+ */
 fn identity(value: i32) -> i32 {
     value
 }

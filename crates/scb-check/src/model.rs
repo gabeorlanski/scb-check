@@ -1,4 +1,8 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
+
+use petgraph::Direction;
+use petgraph::graph::{DiGraph, NodeIndex};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Language {
@@ -15,6 +19,12 @@ impl Language {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Visibility {
+    Public,
+    Private,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceFile {
     pub path: PathBuf,
@@ -27,11 +37,34 @@ pub struct SourceLines {
     pub lines: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct FunctionId {
+    pub file: PathBuf,
+    pub qualified_name: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ScopePath {
+    pub segments: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ScopeId {
+    pub file: PathBuf,
+    pub path: ScopePath,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Function {
+    pub id: FunctionId,
     pub file: PathBuf,
     pub language: Language,
     pub name: String,
+    pub visibility: Visibility,
+    pub bare_call_scope: Option<ScopeId>,
+    pub visible_bare_call_scopes: Vec<ScopeId>,
+    pub has_receiver: bool,
+    pub has_nontrivial_params: bool,
     pub params: Vec<String>,
     pub start_line: usize,
     pub end_line: usize,
@@ -40,7 +73,7 @@ pub struct Function {
     pub cognitive: usize,
     pub max_nesting: usize,
     pub calls: Vec<CallSite>,
-    pub body_shape: BodyShape,
+    pub body: FunctionBody,
 }
 
 impl Function {
@@ -64,15 +97,110 @@ impl Function {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CallSite {
     pub name: String,
+    pub target: Option<FunctionId>,
     pub line: usize,
     pub nesting: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum BodyShape {
-    IdentityReturn { value: String },
-    CallReturn { callee: String, args: Vec<String> },
+pub struct ImportBinding {
+    pub file: PathBuf,
+    pub local_name: String,
+    pub target_name: String,
+    pub target_file_suffixes: Vec<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallLocation {
+    pub caller_index: usize,
+    pub call_index: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct CallGraph {
+    graph: DiGraph<usize, CallLocation>,
+    nodes_by_function: BTreeMap<FunctionId, NodeIndex>,
+}
+
+impl CallGraph {
+    pub fn from_functions(functions: &[Function]) -> Self {
+        let mut graph = DiGraph::new();
+        let nodes_by_function: BTreeMap<FunctionId, NodeIndex> = functions
+            .iter()
+            .enumerate()
+            .map(|(index, function)| (function.id.clone(), graph.add_node(index)))
+            .collect();
+
+        for (caller_index, function) in functions.iter().enumerate() {
+            for (call_index, call) in function.calls.iter().enumerate() {
+                if let Some(target_node) = call
+                    .target
+                    .as_ref()
+                    .and_then(|target| nodes_by_function.get(target))
+                {
+                    graph.add_edge(
+                        nodes_by_function[&function.id],
+                        *target_node,
+                        CallLocation {
+                            caller_index,
+                            call_index,
+                        },
+                    );
+                }
+            }
+        }
+        Self {
+            graph,
+            nodes_by_function,
+        }
+    }
+
+    pub fn incoming_to<'functions>(
+        &self,
+        functions: &'functions [Function],
+        target: &FunctionId,
+    ) -> Vec<ResolvedCall<'functions>> {
+        let Some(target_node) = self.nodes_by_function.get(target) else {
+            return Vec::new();
+        };
+
+        self.graph
+            .edges_directed(*target_node, Direction::Incoming)
+            .filter_map(|edge| {
+                let location = edge.weight();
+                let caller = functions.get(location.caller_index)?;
+                let call = caller.calls.get(location.call_index)?;
+                Some(ResolvedCall { caller, call })
+            })
+            .collect()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResolvedCall<'functions> {
+    pub caller: &'functions Function,
+    pub call: &'functions CallSite,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FunctionBody {
+    SimpleReturn(SimpleExpr),
     Complex,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SimpleExpr {
+    Param(String),
+    Constant,
+    Literal,
+    Unsupported,
+    Call(SimpleCall),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SimpleCall {
+    pub callee: String,
+    pub args: Vec<SimpleExpr>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,6 +208,7 @@ pub struct CloneBlock {
     pub file: PathBuf,
     pub start_line: usize,
     pub end_line: usize,
+    pub sloc: usize,
     pub group_hash: String,
     pub instance_count: usize,
     pub first_lines: Vec<String>,

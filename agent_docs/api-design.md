@@ -22,8 +22,14 @@
 - Keep scoring-sensitive invariants centralized. `verbosity` is a union over `SLOC` lines; `erosion` and `cog_erosion` are high-complexity mass shares.
 <!-- rule:8 -->
 - Prefer typed error enums inside Rust modules. Convert to formatted user-facing strings at the CLI boundary.
+<!-- rule:1232 -->
+- Do not expose `String` as an internal error transport across module layers when the caller can act on specific failure kinds. Keep structured errors until the boundary renders them.
 <!-- rule:9 -->
 - Replace large tuples with named structs when values cross function or module boundaries.
+<!-- rule:1235 -->
+- Structural rules must consume minimal semantic facts from shared models. Bare names are display labels or conservative hints, not proof that two references resolve to the same symbol.
+<!-- rule:1236 -->
+- Language-specific syntax and conventions belong in `languages/<language>/` adapters. Core analysis and `rules/` APIs should accept language-agnostic shared facts, not parser-native nodes, syntax kinds, or language-specific naming/comment/visibility conventions.
 <!-- rule:1218 -->
 - Use serde structs for known config shapes where practical, including defaults and unknown-field rejection. Keep manual TOML traversal only for format discovery or compatibility behavior.
 <!-- rule:1219 -->

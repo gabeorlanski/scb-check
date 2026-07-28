@@ -1,9 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 
+use ast_grep_language::SupportLang;
 use tree_sitter::{Node, Tree};
 
-use crate::model::{BodyShape, CallSite, Function, Language};
+use crate::model::{
+    CallSite, Function, FunctionBody, FunctionId, ImportBinding, Language, ScopeId, ScopePath,
+    SimpleCall, SimpleExpr, Visibility,
+};
 
 mod python;
 mod rust;
@@ -20,18 +24,27 @@ pub struct CommentSpan {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FunctionSpan {
     pub name: String,
+    pub qualified_name: String,
+    pub visibility: Visibility,
+    pub bare_call_scope: Option<ScopePath>,
+    pub visible_bare_call_scopes: Vec<ScopePath>,
+    pub has_receiver: bool,
+    pub has_nontrivial_params: bool,
     pub start_line: usize,
     pub end_line: usize,
-    pub signature: String,
     pub cyclomatic: usize,
     pub cognitive: usize,
     pub max_nesting: usize,
+    pub params: Vec<String>,
+    pub calls: Vec<CallSite>,
+    pub body: FunctionBody,
     pub clone_fingerprint: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedSyntax {
     pub functions: Vec<FunctionSpan>,
+    pub imports: Vec<ImportBinding>,
     pub comments: Vec<CommentSpan>,
     pub sloc_lines: BTreeSet<usize>,
     pub node_count: usize,
@@ -44,44 +57,25 @@ pub trait LanguageParser {
     fn is_function_node(&self, kind: &str) -> bool;
     fn is_comment_node(&self, kind: &str) -> bool;
     fn build_function(&self, source: &str, node: Node<'_>) -> FunctionSpan;
+    fn import_bindings(&self, path: &Path, source: &str, root: Node<'_>) -> Vec<ImportBinding>;
     fn sloc_lines(&self, source: &str, root: Node<'_>, comments: &[CommentSpan])
     -> BTreeSet<usize>;
-    fn function_params(&self, signature: &str) -> Vec<String>;
-    fn function_body_lines<'source>(
-        &self,
-        lines: &'source [&'source str],
-    ) -> &'source [&'source str];
-    fn function_body_statements<'source>(&self, lines: &'source [&str]) -> Vec<&'source str>;
-    fn call_keywords(&self) -> &'static [&'static str];
     fn lower_function(
         &self,
         path: &Path,
         span: &FunctionSpan,
-        all_lines: &[&str],
+        _all_lines: &[&str],
         sloc_lines: &BTreeSet<usize>,
     ) -> Function {
-        let lines = function_lines(span, all_lines);
-        let body_lines = self.function_body_lines(lines);
-        lower_function_from_parts(
-            path,
-            self.language(),
-            span,
-            sloc_lines,
-            LoweredFunctionParts {
-                params: self.function_params(&span.signature),
-                body_lines,
-                body_statements: self.function_body_statements(body_lines),
-                call_keywords: self.call_keywords(),
-            },
-        )
+        lower_function_from_span(path, self.language(), span, sloc_lines)
     }
     fn directive_text<'comment>(&self, comment: &'comment CommentSpan) -> Option<&'comment str>;
 
-    fn parse(&self, source: &str) -> Result<ParsedSyntax, String>
+    fn parse(&self, path: &Path, source: &str) -> Result<ParsedSyntax, String>
     where
         Self: Sized,
     {
-        BaseParser::new(self.label(), self.tree_sitter_language()).parse(self, source)
+        BaseParser::new(self.label(), self.tree_sitter_language()).parse(self, path, source)
     }
 }
 
@@ -99,6 +93,7 @@ impl BaseParser {
     fn parse<P: LanguageParser>(
         &self,
         language_parser: &P,
+        path: &Path,
         source: &str,
     ) -> Result<ParsedSyntax, String> {
         let tree = self.parse_tree(source)?;
@@ -107,10 +102,12 @@ impl BaseParser {
             return Err(format!("failed to parse {} source", self.label));
         }
         let functions = Self::collect_functions(language_parser, source, root);
+        let imports = language_parser.import_bindings(path, source, root);
         let comments = Self::collect_comments(language_parser, source, root);
         let sloc_lines = language_parser.sloc_lines(source, root, &comments);
         Ok(ParsedSyntax {
             functions,
+            imports,
             comments,
             sloc_lines,
             node_count: Self::count_nodes(root),
@@ -188,6 +185,8 @@ impl BaseParser {
     pub fn function_span(
         source: &str,
         node: Node<'_>,
+        semantic: FunctionSemantic,
+        facts: FunctionSyntaxFacts,
         cyclomatic: usize,
         cognitive: usize,
         max_nesting: usize,
@@ -200,12 +199,20 @@ impl BaseParser {
         let body = node.child_by_field_name("body");
         FunctionSpan {
             name,
+            qualified_name: semantic.qualified_name,
+            visibility: semantic.visibility,
+            bare_call_scope: semantic.bare_call_scope,
+            visible_bare_call_scopes: semantic.visible_bare_call_scopes,
+            has_receiver: facts.has_receiver,
+            has_nontrivial_params: facts.has_nontrivial_params,
             start_line: node.start_position().row + 1,
             end_line: node.end_position().row + 1,
-            signature: Self::signature_text(source, node),
             cyclomatic,
             cognitive,
             max_nesting,
+            params: facts.params,
+            calls: facts.calls,
+            body: facts.body,
             clone_fingerprint: body
                 .map(|body| Self::clone_fingerprint(source, body))
                 .unwrap_or_default(),
@@ -244,20 +251,6 @@ impl BaseParser {
             || (text.starts_with("'''") && text.ends_with("'''"))
     }
 
-    fn signature_text(source: &str, node: Node<'_>) -> String {
-        let Some(body) = node.child_by_field_name("body") else {
-            return node
-                .utf8_text(source.as_bytes())
-                .unwrap_or_default()
-                .to_string();
-        };
-        source[node.start_byte()..body.start_byte()]
-            .trim()
-            .trim_end_matches('{')
-            .trim()
-            .to_string()
-    }
-
     fn clone_fingerprint(source: &str, body: Node<'_>) -> Vec<String> {
         let mut names = HashMap::new();
         let mut cursor = body.walk();
@@ -267,10 +260,23 @@ impl BaseParser {
     }
 }
 
-pub fn parse_syntax(language: Language, source: &str) -> Result<ParsedSyntax, String> {
+#[cfg(test)]
+fn parse_syntax(language: Language, source: &str) -> Result<ParsedSyntax, String> {
+    let filename = match language {
+        Language::Python => "sample.py",
+        Language::Rust => "sample.rs",
+    };
+    parse_syntax_at_path(language, Path::new(filename), source)
+}
+
+pub fn parse_syntax_at_path(
+    language: Language,
+    path: &Path,
+    source: &str,
+) -> Result<ParsedSyntax, String> {
     match language {
-        Language::Python => python::PYTHON_PARSER.parse(source),
-        Language::Rust => rust::RUST_PARSER.parse(source),
+        Language::Python => python::PYTHON_PARSER.parse(path, source),
+        Language::Rust => rust::RUST_PARSER.parse(path, source),
     }
 }
 
@@ -294,6 +300,13 @@ pub fn directive_text(language: Language, comment: &CommentSpan) -> Option<&str>
     }
 }
 
+pub const fn ast_grep_language(language: Language) -> Option<SupportLang> {
+    match language {
+        Language::Python => Some(SupportLang::Python),
+        Language::Rust => None,
+    }
+}
+
 pub fn function_lines<'source>(
     span: &FunctionSpan,
     all_lines: &'source [&'source str],
@@ -306,103 +319,224 @@ pub fn function_lines<'source>(
     &all_lines[start_index..=end_index.max(start_index)]
 }
 
-fn lower_function_from_parts(
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FunctionSemantic {
+    pub qualified_name: String,
+    pub visibility: Visibility,
+    pub bare_call_scope: Option<ScopePath>,
+    pub visible_bare_call_scopes: Vec<ScopePath>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FunctionSyntaxFacts {
+    pub has_receiver: bool,
+    pub has_nontrivial_params: bool,
+    pub params: Vec<String>,
+    pub calls: Vec<CallSite>,
+    pub body: FunctionBody,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FunctionParams {
+    pub has_receiver: bool,
+    pub names: Vec<String>,
+    pub has_nontrivial: bool,
+}
+
+pub fn function_syntax_facts(
+    _source: &str,
+    node: Node<'_>,
+    params: impl Fn(Node<'_>) -> FunctionParams,
+    is_function_node: impl Fn(&str) -> bool,
+    callee_name: impl Fn(Node<'_>) -> Option<String>,
+    increases_call_nesting: impl Fn(Node<'_>) -> bool,
+    function_body: impl Fn(Node<'_>, &[String]) -> FunctionBody,
+) -> FunctionSyntaxFacts {
+    let body = node.child_by_field_name("body");
+    let params = node
+        .child_by_field_name("parameters")
+        .map(params)
+        .unwrap_or_default();
+    FunctionSyntaxFacts {
+        calls: body
+            .map(|body| {
+                collect_call_sites(body, is_function_node, callee_name, increases_call_nesting)
+            })
+            .unwrap_or_default(),
+        body: body.map_or(FunctionBody::Complex, |body| {
+            function_body(body, &params.names)
+        }),
+        has_receiver: params.has_receiver,
+        has_nontrivial_params: params.has_nontrivial,
+        params: params.names,
+    }
+}
+
+fn lower_function_from_span(
     path: &Path,
     language: Language,
     span: &FunctionSpan,
     sloc_lines: &BTreeSet<usize>,
-    parts: LoweredFunctionParts<'_>,
 ) -> Function {
     Function {
+        id: FunctionId {
+            file: path.to_path_buf(),
+            qualified_name: span.qualified_name.clone(),
+        },
         file: path.to_path_buf(),
         language,
         name: span.name.clone(),
-        params: parts.params,
+        visibility: span.visibility,
+        bare_call_scope: span.bare_call_scope.clone().map(|scope_path| ScopeId {
+            file: path.to_path_buf(),
+            path: scope_path,
+        }),
+        visible_bare_call_scopes: span
+            .visible_bare_call_scopes
+            .iter()
+            .cloned()
+            .map(|scope_path| ScopeId {
+                file: path.to_path_buf(),
+                path: scope_path,
+            })
+            .collect(),
+        has_receiver: span.has_receiver,
+        has_nontrivial_params: span.has_nontrivial_params,
+        params: span.params.clone(),
         start_line: span.start_line,
         end_line: span.end_line,
         sloc: function_sloc(span, sloc_lines),
         cyclomatic: span.cyclomatic,
         cognitive: span.cognitive,
         max_nesting: span.max_nesting,
-        calls: call_sites(
-            &numbered_body_lines(parts.body_lines, span.start_line),
-            parts.call_keywords,
-        ),
-        body_shape: body_shape(&parts.body_statements),
+        calls: span.calls.clone(),
+        body: span.body.clone(),
     }
-}
-
-struct LoweredFunctionParts<'source> {
-    params: Vec<String>,
-    body_lines: &'source [&'source str],
-    body_statements: Vec<&'source str>,
-    call_keywords: &'static [&'static str],
-}
-
-fn signature_params(signature: &str, normalize: impl FnMut(&str) -> Option<String>) -> Vec<String> {
-    let Some(start) = signature.find('(') else {
-        return Vec::new();
-    };
-    let Some(end) = signature[start + 1..].find(')') else {
-        return Vec::new();
-    };
-    signature[start + 1..start + 1 + end]
-        .split(',')
-        .filter_map(normalize)
-        .collect()
 }
 
 fn function_sloc(span: &FunctionSpan, sloc_lines: &BTreeSet<usize>) -> usize {
     sloc_lines.range(span.start_line..=span.end_line).count()
 }
 
-fn numbered_body_lines<'line>(
-    lines: &'line [&'line str],
-    start_line: usize,
-) -> Vec<(usize, &'line str)> {
-    lines
-        .iter()
-        .enumerate()
-        .map(|(offset, line)| (start_line + 1 + offset, *line))
-        .collect()
-}
-
-fn call_sites(lines: &[(usize, &str)], keywords: &[&str]) -> Vec<CallSite> {
+pub fn collect_call_sites(
+    body: Node<'_>,
+    is_function_node: impl Fn(&str) -> bool,
+    callee_name: impl Fn(Node<'_>) -> Option<String>,
+    increases_call_nesting: impl Fn(Node<'_>) -> bool,
+) -> Vec<CallSite> {
     let mut calls = Vec::new();
-    for (line_number, line) in lines {
-        for name in call_names(line, keywords) {
+    let mut stack = Vec::new();
+    push_children_reverse_with_nesting(body, 0, &mut stack);
+    while let Some((node, nesting)) = stack.pop() {
+        if is_function_node(node.kind()) {
+            continue;
+        }
+        if let Some(name) = callee_name(node) {
             calls.push(CallSite {
                 name,
-                line: *line_number,
-                nesting: leading_nesting(line),
+                target: None,
+                line: node.start_position().row + 1,
+                nesting,
             });
         }
+        let child_nesting = if increases_call_nesting(node) {
+            nesting + 1
+        } else {
+            nesting
+        };
+        push_children_reverse_with_nesting(node, child_nesting, &mut stack);
     }
     calls
 }
 
-fn body_shape(statements: &[&str]) -> BodyShape {
-    if statements.len() != 1 {
-        return BodyShape::Complex;
-    }
-
-    let statement = statements[0].trim().trim_end_matches(';').trim();
-    let expression = statement
-        .strip_prefix("return ")
-        .unwrap_or(statement)
-        .trim();
-
-    if is_identifier(expression) {
-        return BodyShape::IdentityReturn {
-            value: expression.to_string(),
+fn push_children_reverse_with_nesting<'tree>(
+    node: Node<'tree>,
+    nesting: usize,
+    stack: &mut Vec<(Node<'tree>, usize)>,
+) {
+    for index in (0..node.child_count()).rev() {
+        let Ok(index) = u32::try_from(index) else {
+            continue;
         };
+        if let Some(child) = node.child(index) {
+            stack.push((child, nesting));
+        }
     }
+}
 
-    if let Some((callee, args)) = call_expression(expression) {
-        return BodyShape::CallReturn { callee, args };
+pub fn bare_call_name(
+    source: &str,
+    node: Node<'_>,
+    call_kind: &str,
+    callee_kind: &str,
+) -> Option<String> {
+    if node.kind() != call_kind {
+        return None;
     }
+    let function = node.child_by_field_name("function")?;
+    (function.kind() == callee_kind).then(|| node_text(source, function))
+}
 
-    BodyShape::Complex
+pub fn call_body(source: &str, call: Node<'_>, params: &[String]) -> FunctionBody {
+    let Some(function) = call.child_by_field_name("function") else {
+        return FunctionBody::Complex;
+    };
+    let callee = node_text(source, function);
+    if callee.is_empty() {
+        return FunctionBody::Complex;
+    }
+    FunctionBody::SimpleReturn(SimpleExpr::Call(SimpleCall {
+        callee,
+        args: call
+            .child_by_field_name("arguments")
+            .map(|arguments| simple_arguments(source, arguments, params))
+            .unwrap_or_default(),
+    }))
+}
+
+pub fn simple_arguments(source: &str, arguments: Node<'_>, params: &[String]) -> Vec<SimpleExpr> {
+    let mut cursor = arguments.walk();
+    arguments
+        .named_children(&mut cursor)
+        .map(|argument| simple_expr(source, argument, params))
+        .collect()
+}
+
+pub fn simple_expr(source: &str, expression: Node<'_>, params: &[String]) -> SimpleExpr {
+    match expression.kind() {
+        "identifier" => {
+            let name = node_text(source, expression);
+            if params.iter().any(|param| param == &name) {
+                SimpleExpr::Param(name)
+            } else {
+                SimpleExpr::Unsupported
+            }
+        }
+        kind if is_literal_node(kind) => SimpleExpr::Literal,
+        _ => SimpleExpr::Unsupported,
+    }
+}
+
+pub fn path_expr(source: &str, expression: Node<'_>) -> Option<Vec<String>> {
+    let mut segments = Vec::new();
+    let mut stack = vec![expression];
+    while let Some(node) = stack.pop() {
+        if matches!(
+            node.kind(),
+            "identifier" | "field_identifier" | "type_identifier"
+        ) {
+            segments.push(node_text(source, node));
+            continue;
+        }
+        push_children_reverse(node, &mut stack);
+    }
+    (!segments.is_empty()).then_some(segments)
+}
+
+pub fn node_text(source: &str, node: Node<'_>) -> String {
+    node.utf8_text(source.as_bytes())
+        .unwrap_or_default()
+        .to_string()
 }
 
 fn comment_intervals_by_line(comments: &[CommentSpan]) -> BTreeMap<usize, Vec<(usize, usize)>> {
@@ -454,105 +588,6 @@ fn is_punctuation_only(line: &str) -> bool {
                 '{' | '}' | '[' | ']' | '(' | ')' | ';' | ',' | ':'
             )
         })
-}
-
-fn leading_nesting(line: &str) -> usize {
-    line.chars()
-        .take_while(|character| *character == ' ')
-        .count()
-        / 4
-}
-
-fn call_names(line: &str, keywords: &[&str]) -> Vec<String> {
-    let bytes = line.as_bytes();
-    let mut calls = Vec::new();
-    let mut index = 0;
-    while index < bytes.len() {
-        let Some((start, end)) = identifier_at(bytes, index) else {
-            index += 1;
-            continue;
-        };
-        if let Some(name) = call_name_at(line, start, end, keywords) {
-            calls.push(name.to_string());
-        }
-        index = end;
-    }
-    calls
-}
-
-fn identifier_at(bytes: &[u8], index: usize) -> Option<(usize, usize)> {
-    if !is_ident_start(bytes[index]) {
-        return None;
-    }
-    let mut end = index + 1;
-    while end < bytes.len() && is_ident_continue(bytes[end]) {
-        end += 1;
-    }
-    Some((index, end))
-}
-
-fn call_name_at<'line>(
-    line: &'line str,
-    start: usize,
-    end: usize,
-    keywords: &[&str],
-) -> Option<&'line str> {
-    let bytes = line.as_bytes();
-    let name = &line[start..end];
-    let after = next_non_space(bytes, end);
-    (after < bytes.len()
-        && bytes[after] == b'('
-        && is_bare_call(line, start)
-        && !keywords.contains(&name))
-    .then_some(name)
-}
-
-fn next_non_space(bytes: &[u8], mut index: usize) -> usize {
-    while index < bytes.len() && bytes[index].is_ascii_whitespace() {
-        index += 1;
-    }
-    index
-}
-
-fn is_bare_call(line: &str, start: usize) -> bool {
-    let before = line[..start].trim_end();
-    !before.ends_with('.') && !before.ends_with("::")
-}
-
-const fn is_ident_start(byte: u8) -> bool {
-    byte.is_ascii_alphabetic() || byte == b'_'
-}
-
-const fn is_ident_continue(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || byte == b'_'
-}
-
-fn is_identifier(value: &str) -> bool {
-    let mut chars = value.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    (first.is_ascii_alphabetic() || first == '_')
-        && chars.all(|character| character.is_ascii_alphanumeric() || character == '_')
-}
-
-fn call_expression(expression: &str) -> Option<(String, Vec<String>)> {
-    let open = expression.find('(')?;
-    let close = expression.rfind(')')?;
-    if close < open {
-        return None;
-    }
-    let callee = expression[..open].trim();
-    if callee.is_empty() {
-        return None;
-    }
-    let args = expression[open + 1..close]
-        .split(',')
-        .map(str::trim)
-        .filter(|arg| !arg.is_empty())
-        .map(ToString::to_string)
-        .collect();
-    Some((callee.to_string(), args))
 }
 
 fn clone_statement_fingerprint(
@@ -624,7 +659,8 @@ fn clone_leaf_token(
 }
 
 fn is_clone_noise_node(source: &str, node: Node<'_>) -> bool {
-    node.kind() == "comment" || is_plain_string_statement(source, node)
+    matches!(node.kind(), "comment" | "line_comment" | "block_comment")
+        || is_plain_string_statement(source, node)
 }
 
 fn is_plain_string_statement(source: &str, node: Node<'_>) -> bool {
@@ -674,7 +710,7 @@ fn normalize_identifier(token: &str, names: &mut HashMap<String, String>) -> Str
 #[cfg(test)]
 mod tests {
     use super::parse_syntax;
-    use crate::model::Language;
+    use crate::model::{FunctionBody, Language, ScopePath, SimpleCall, SimpleExpr, Visibility};
 
     #[test]
     fn parser_finds_python_methods_and_rust_impl_methods() {
@@ -707,6 +743,67 @@ impl Thing {
         assert_eq!(rust.functions.len(), 1);
         assert_eq!(rust.functions[0].name, "same");
         assert_eq!(rust.functions[0].start_line, 5);
+    }
+
+    #[test]
+    fn parser_extracts_semantic_identity_and_node_facts() {
+        let python = parse_syntax(
+            Language::Python,
+            r"
+class Thing:
+    def same(self, value):
+        return value
+",
+        )
+        .expect("python should parse");
+        let rust = parse_syntax(
+            Language::Rust,
+            r"
+mod inner {
+    fn clean(value: &str) -> String {
+        value.trim().to_string()
+    }
+
+    fn route(value: &str) -> String {
+        clean(value)
+    }
+}
+",
+        )
+        .expect("rust should parse");
+
+        assert_eq!(python.functions[0].qualified_name, "Thing.same");
+        assert_eq!(python.functions[0].visibility, Visibility::Public);
+        assert_eq!(python.functions[0].bare_call_scope, None);
+        assert_eq!(python.functions[0].params, ["value"]);
+        assert_eq!(
+            python.functions[0].body,
+            FunctionBody::SimpleReturn(SimpleExpr::Param("value".to_string()))
+        );
+
+        let route = rust
+            .functions
+            .iter()
+            .find(|function| function.name == "route")
+            .expect("route should be parsed");
+        assert_eq!(route.qualified_name, "inner::route");
+        assert_eq!(route.visibility, Visibility::Private);
+        assert_eq!(
+            route.bare_call_scope,
+            Some(ScopePath {
+                segments: vec!["inner".to_string()]
+            })
+        );
+        assert_eq!(route.params, ["value"]);
+        assert_eq!(route.calls.len(), 1);
+        assert_eq!(route.calls[0].name, "clean");
+        assert_eq!(
+            route.body,
+            FunctionBody::SimpleReturn(SimpleExpr::Call(SimpleCall {
+                callee: "clean".to_string(),
+                args: vec![SimpleExpr::Param("value".to_string())]
+            }))
+        );
     }
 
     #[test]
@@ -747,5 +844,22 @@ fn classify(value: i32) -> &'static str {
 
         assert!(python.is_err());
         assert!(rust.is_err());
+    }
+
+    #[test]
+    fn python_sloc_keeps_byte_and_f_string_statements() {
+        let python = parse_syntax(
+            Language::Python,
+            r#"
+"module docstring"
+b"payload"
+f"{value}"
+r"plain raw string"
+value = 1
+"#,
+        )
+        .expect("python should parse");
+
+        assert_eq!(python.sloc_lines, [3, 4, 6].into_iter().collect());
     }
 }

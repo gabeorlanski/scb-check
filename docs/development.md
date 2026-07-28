@@ -9,15 +9,15 @@ This guide summarizes the current implementation status and the preferred approa
 - `scb-check check PATH` reports human-readable flags or JSON scores.
 - `scb-check rule RULE_ID` prints bundled `ast-grep` YAML or structural rule metadata.
 
-The Python package is only a wheel delivery vehicle for `uvx`; wheels install the compiled Rust binary directly as the `scb-check` script. The old Python implementation and runtime shim have been removed.
+The Python package is only a wheel delivery vehicle for `uvx`; wheels install the compiled Rust binary directly as the `scb-check` script. The old Python implementation and runtime shim have been removed. Binary wheels retain the build host's compatible platform tag; the release workflow uses a pinned glibc runner rather than publishing an unrestricted `linux_*` wheel.
 
 Implemented analysis paths:
 
 - Source discovery for the first-cutover languages: Python (`.py`, `.pyw`) and Rust (`.rs`).
-- Tree-sitter parsing into shared function, call-site, SLOC, complexity, comment, and clone facts.
+- Tree-sitter parsing into shared function, import/use binding, call-site, `CallGraph`, SLOC, complexity, comment, and clone facts.
 - Parser-derived `SLOC` accounting shared by verbosity, clone line counts, structural spans, and erosion mass.
 - Duplicate-structure detection by normalized parser-body hashing for Python and Rust.
-- Bundled Python `ast-grep` slop patterns through the Rust ast-grep crates, plus optional local rules from `SCB_CHECK_EXTRA_SLOP_RULES`.
+- Bundled Python `ast-grep` slop patterns through the Rust ast-grep crates, dispatched through language-adapter ast-grep capability, plus optional local rules from `SCB_CHECK_EXTRA_SLOP_RULES`.
 - Rust-coded structural rules over shared Python/Rust facts; the current bundled structural rules are `trivial-wrapper` and opt-in `low-use-short-function`.
 - Cyclomatic and cognitive erosion scores for Python and Rust, with sorted and compensated mass summation for stable JSON calculations.
 - Python and Rust source ignores for `ast-grep` and structural rule IDs.
@@ -29,7 +29,7 @@ Implemented analysis paths:
 - Exit `1` means the run completed and reported findings.
 - Exit `2` is for user-facing failures such as bad config, bad paths, unknown rules, invalid directives, or no discoverable supported source files.
 - Individual parse failures warn and skip the file instead of aborting the run.
-- Rust files skip Python ast-grep rules. Source directives use language-specific comment syntax.
+- Languages without an ast-grep capability skip bundled ast-grep rules. Source directives use language-adapter comment normalization.
 - Config discovery and source-directive behavior are user-facing; keep README examples synchronized when they change.
 
 ## Where to make changes
@@ -38,7 +38,8 @@ Implemented analysis paths:
 | --- | --- |
 | Public CLI command or option | `crates/scb-check/src/` |
 | Config loading or path walking | `crates/scb-check/src/config.rs`, `crates/scb-check/src/walk.rs` |
-| Source parsing, `SLOC`, directives, shared facts | `crates/scb-check/src/languages/mod.rs`, `crates/scb-check/src/languages/<language>/mod.rs`, `crates/scb-check/src/directives.rs`, `crates/scb-check/src/analyze.rs` |
+| Source parsing, `SLOC`, comments, language conventions, and fact lowering | `crates/scb-check/src/languages/mod.rs`, `crates/scb-check/src/languages/<language>/mod.rs` |
+| Directive filtering over normalized comment facts and project assembly | `crates/scb-check/src/directives.rs`, `crates/scb-check/src/analyze.rs` |
 | Clone detection | `crates/scb-check/src/clones.rs` |
 | `ast-grep` integration | `crates/scb-check/src/astgrep.rs` and `crates/scb-check/src/languages/python/ast_grep_rules/` |
 | Structural rule behavior | `crates/scb-check/src/rules/` |
@@ -60,9 +61,10 @@ Implemented analysis paths:
 3. Set immutable violation metadata: `id`, `severity`, `target`, `message`, and `FIX_AVAILABILITY`.
 4. Add checker functions that consume `RuleContext` and push `Diagnostic::new(...).into_finding()`.
 5. Operate on shared function/project facts from `RuleContext`; do not inspect language-native tree-sitter nodes.
-6. Register the rule in the `Rule` enum and dispatch in `crates/scb-check/src/rules/mod.rs`.
-7. Ensure the rule ID does not collide with bundled `ast-grep` rule IDs.
-8. Test observable findings, ignore behavior, report fields, and rendering prefixes.
+6. Treat bare names as labels or conservative hints. If the rule depends on symbol identity or call locations, use an existing semantic fact such as span, simple-return body facts, typed scope facts, or the shared `CallGraph`, or add the smallest shared fact that proves the relationship.
+7. Register the rule in the `Rule` enum and dispatch in `crates/scb-check/src/rules/mod.rs`.
+8. Ensure the rule ID does not collide with bundled `ast-grep` rule IDs.
+9. Test observable findings, ignore behavior, report fields, and rendering prefixes.
 
 ## Adding a language
 

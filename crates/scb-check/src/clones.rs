@@ -8,6 +8,7 @@ pub struct CloneCandidate {
     file: PathBuf,
     start_line: usize,
     end_line: usize,
+    sloc: usize,
     group_hash: String,
     first_lines: Vec<String>,
 }
@@ -37,6 +38,9 @@ pub fn function_clone_candidate(
         file: function.file.clone(),
         start_line: function.start_line,
         end_line: function.end_line,
+        sloc: sloc_lines
+            .range(function.start_line..=function.end_line)
+            .count(),
         group_hash: clone_group_hash(fingerprint),
         first_lines,
     })
@@ -69,6 +73,7 @@ pub fn detect_clones(candidates: Vec<CloneCandidate>) -> Vec<CloneBlock> {
                 file: candidate.file,
                 start_line: candidate.start_line,
                 end_line: candidate.end_line,
+                sloc: candidate.sloc,
                 group_hash: group_hash.clone(),
                 instance_count,
                 first_lines: candidate.first_lines,
@@ -190,5 +195,70 @@ fn subtract(left: i32, right: i32) -> i32 {
 
         assert_eq!(report.clone_loc, 0);
         assert_eq!(report.verbosity_flagged_loc, 0);
+    }
+
+    #[test]
+    fn rust_clone_fingerprints_ignore_comments_and_require_two_executable_statements() {
+        let root = test_dir();
+        write(
+            &root.join("sample.rs"),
+            r"
+fn one_statement(value: i32) -> i32 {
+    // matching comment
+    value
+}
+
+fn another_one_statement(item: i32) -> i32 {
+    // matching comment
+    item
+}
+
+fn first(value: i32) -> i32 {
+    // short comment
+    let current = value + 1;
+    current
+}
+
+fn second(item: i32) -> i32 {
+    /* structurally different
+       multiline comment */
+    let total = item + 2;
+    total
+}
+",
+        );
+
+        let report = analyze_dir(&root, true, false, None).expect("analysis should succeed");
+
+        assert_eq!(report.clones.len(), 2);
+        assert!(report.clones.iter().all(|clone| clone.start_line >= 11));
+    }
+
+    #[test]
+    fn rendered_clone_counts_and_filters_by_duplicated_sloc() {
+        let root = test_dir();
+        write(
+            &root.join("sample.py"),
+            r#"
+def first(value):
+    """documentation"""
+    current = value + 1
+    # comment
+    return current
+
+def second(item):
+    """other documentation"""
+    total = item + 2
+    # another comment
+    return total
+"#,
+        );
+
+        let report = analyze_dir(&root, true, false, None).expect("analysis should succeed");
+        let human = render_human(&report, None, 1);
+        let filtered = render_human(&report, Some(4), 1);
+
+        assert!(human.contains("duplicated block (3 lines, 2 instances)"));
+        assert!(!filtered.contains("duplicate-structure:"));
     }
 }

@@ -1,2 +1,2 @@
-def identity(value):
+def _identity(value):
     return value
