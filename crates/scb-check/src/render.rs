@@ -63,7 +63,7 @@ fn append_clone_entries(
     min_duplicate_lines: Option<usize>,
 ) {
     for group in clone_groups(&report.clones) {
-        let line_count = clone_line_count(group.anchor());
+        let line_count = group.anchor().sloc;
         if min_duplicate_lines.is_some_and(|minimum| line_count < minimum) {
             continue;
         }
@@ -181,15 +181,9 @@ fn clone_groups(clones: &[CloneBlock]) -> Vec<CloneGroup> {
 
     let mut groups: Vec<CloneGroup> = Vec::new();
     for clone in clones {
-        if groups
-            .last()
-            .is_some_and(|group| group.group_hash() == clone.group_hash)
-        {
-            if let Some(group) = groups.last_mut() {
-                group.rest.push(clone);
-            }
-        } else {
-            groups.push(CloneGroup::new(clone));
+        match groups.last_mut() {
+            Some(group) if group.group_hash() == clone.group_hash => group.rest.push(clone),
+            _ => groups.push(CloneGroup::new(clone)),
         }
     }
     groups.sort_by(|left, right| {
@@ -260,10 +254,6 @@ fn render_clone_group(group: &CloneGroup, line_count: usize) -> String {
         lines.push(format!("{pad} │"));
     }
     lines.join("\n")
-}
-
-const fn clone_line_count(clone: &CloneBlock) -> usize {
-    clone.sloc
 }
 
 fn render_ast_grep(

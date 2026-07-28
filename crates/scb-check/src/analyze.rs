@@ -18,7 +18,6 @@ use crate::rules::{run_structural_rules, structural_rule_ids};
 
 #[derive(Debug)]
 struct ParsedFile {
-    path: PathBuf,
     language: Language,
     sloc_lines: BTreeSet<usize>,
     functions: Vec<Function>,
@@ -41,6 +40,7 @@ struct ProjectFacts {
     imports: Vec<ImportBinding>,
     total_loc: usize,
     source_lines: Vec<SourceLines>,
+    sloc_by_file: BTreeMap<PathBuf, BTreeSet<usize>>,
     syntax_counts: BTreeMap<Language, (usize, usize)>,
 }
 
@@ -76,7 +76,7 @@ pub fn analyze(
 ) -> Result<Report, String> {
     let ast_grep_catalog = AstGrepCatalog::load()?;
     let valid_rule_ids = valid_rule_ids(&ast_grep_catalog)?;
-    let mut parsed_files = parse_files(
+    let parsed_files = parse_files(
         files,
         disable_sg,
         include_all,
@@ -84,7 +84,7 @@ pub fn analyze(
         &ast_grep_catalog,
     )?;
     let files_scanned = parsed_files.len();
-    let mut project = collect_project_facts(&mut parsed_files);
+    let mut project = collect_project_facts(parsed_files);
     resolve_project_call_sites(&mut project.functions, &project.imports);
     let call_graph = CallGraph::from_functions(&project.functions);
     let clones = detect_clones(project.clone_candidates);
@@ -99,7 +99,7 @@ pub fn analyze(
         include_all,
     )?;
     if !include_all {
-        ast_grep_findings = apply_count_thresholds(ast_grep_findings, &ast_grep_catalog);
+        ast_grep_findings = apply_threshold_map(ast_grep_findings, &ast_grep_catalog.thresholds());
         structural_findings =
             filter_structural_findings(structural_findings, &project.ignore_directives);
     }
@@ -107,7 +107,7 @@ pub fn analyze(
         &clones,
         &ast_grep_findings,
         &structural_findings,
-        &parsed_files,
+        &project.sloc_by_file,
     );
     let function_summary = function_summary(&project.functions);
 
@@ -166,11 +166,11 @@ fn line_summary(
     clones: &[CloneBlock],
     ast_grep_findings: &[AstGrepFinding],
     structural_findings: &[StructuralFinding],
-    parsed_files: &[ParsedFile],
+    sloc_by_file: &BTreeMap<PathBuf, BTreeSet<usize>>,
 ) -> LineSummary {
-    let clone_lines = finding_item_lines(clones, parsed_files);
-    let ast_grep_lines = finding_item_lines(ast_grep_findings, parsed_files);
-    let structural_lines = finding_item_lines(structural_findings, parsed_files);
+    let clone_lines = finding_item_lines(clones, sloc_by_file);
+    let ast_grep_lines = finding_item_lines(ast_grep_findings, sloc_by_file);
+    let structural_lines = finding_item_lines(structural_findings, sloc_by_file);
     let clone_loc = clone_lines.len();
     let ast_grep_flagged_loc = ast_grep_lines.len();
     let structural_rule_loc = structural_lines.len();
@@ -320,7 +320,7 @@ fn parse_files(
     Ok(parsed_files)
 }
 
-fn collect_project_facts(parsed_files: &mut [ParsedFile]) -> ProjectFacts {
+fn collect_project_facts(parsed_files: Vec<ParsedFile>) -> ProjectFacts {
     let mut functions = Vec::new();
     let mut clone_candidates = Vec::new();
     let mut ast_grep_findings = Vec::new();
@@ -329,22 +329,18 @@ fn collect_project_facts(parsed_files: &mut [ParsedFile]) -> ProjectFacts {
     let mut imports = Vec::new();
     let mut total_loc = 0;
     let mut source_lines = Vec::new();
+    let mut sloc_by_file = BTreeMap::new();
     let mut syntax_counts: BTreeMap<Language, (usize, usize)> = BTreeMap::new();
     for parsed in parsed_files {
         total_loc += parsed.sloc_lines.len();
-        functions.append(&mut parsed.functions);
-        clone_candidates.append(&mut parsed.clone_candidates);
-        ast_grep_findings.append(&mut parsed.ast_grep_findings);
-        ignore_directives.append(&mut parsed.ignore_directives);
-        boundary_directives.append(&mut parsed.boundary_directives);
-        imports.append(&mut parsed.imports);
-        source_lines.push(std::mem::replace(
-            &mut parsed.source_lines,
-            SourceLines {
-                file: parsed.path.clone(),
-                lines: Vec::new(),
-            },
-        ));
+        functions.extend(parsed.functions);
+        clone_candidates.extend(parsed.clone_candidates);
+        ast_grep_findings.extend(parsed.ast_grep_findings);
+        ignore_directives.extend(parsed.ignore_directives);
+        boundary_directives.extend(parsed.boundary_directives);
+        imports.extend(parsed.imports);
+        sloc_by_file.insert(parsed.source_lines.file.clone(), parsed.sloc_lines);
+        source_lines.push(parsed.source_lines);
         let entry = syntax_counts.entry(parsed.language).or_insert((0, 0));
         entry.0 += 1;
         entry.1 += parsed.node_count;
@@ -359,6 +355,7 @@ fn collect_project_facts(parsed_files: &mut [ParsedFile]) -> ProjectFacts {
         imports,
         total_loc,
         source_lines,
+        sloc_by_file,
         syntax_counts,
     }
 }
@@ -410,7 +407,6 @@ fn parse_file(
     };
 
     Ok(ParsedFile {
-        path: file.path.clone(),
         language: file.language,
         sloc_lines,
         functions,
@@ -445,13 +441,6 @@ fn validate_unique_rule_ids(
         return Err(format!("duplicate rule id: {duplicate}"));
     }
     Ok(())
-}
-
-fn apply_count_thresholds(
-    findings: Vec<AstGrepFinding>,
-    ast_grep_catalog: &AstGrepCatalog,
-) -> Vec<AstGrepFinding> {
-    apply_threshold_map(findings, &ast_grep_catalog.thresholds())
 }
 
 fn apply_threshold_map(
@@ -534,27 +523,13 @@ impl FindingRange for crate::model::CloneBlock {
 
 fn finding_item_lines(
     findings: &[impl FindingRange],
-    parsed_files: &[ParsedFile],
+    sloc_by_file: &BTreeMap<PathBuf, BTreeSet<usize>>,
 ) -> BTreeSet<(PathBuf, usize)> {
-    finding_lines(
-        parsed_files,
-        findings
-            .iter()
-            .map(|finding| (finding.file(), finding.start_line(), finding.end_line())),
-    )
-}
-
-fn finding_lines<'a>(
-    parsed_files: &'a [ParsedFile],
-    findings: impl Iterator<Item = (&'a PathBuf, usize, usize)>,
-) -> BTreeSet<(PathBuf, usize)> {
-    let sloc_by_file: BTreeMap<&Path, &BTreeSet<usize>> = parsed_files
-        .iter()
-        .map(|parsed| (parsed.path.as_path(), &parsed.sloc_lines))
-        .collect();
     findings
+        .iter()
+        .map(|finding| (finding.file(), finding.start_line(), finding.end_line()))
         .flat_map(|(file, start_line, end_line)| {
-            sloc_lines_for_range(file, start_line, end_line, &sloc_by_file)
+            sloc_lines_for_range(file, start_line, end_line, sloc_by_file)
         })
         .collect()
 }
@@ -563,7 +538,7 @@ fn sloc_lines_for_range(
     file: &Path,
     start_line: usize,
     end_line: usize,
-    sloc_by_file: &BTreeMap<&Path, &BTreeSet<usize>>,
+    sloc_by_file: &BTreeMap<PathBuf, BTreeSet<usize>>,
 ) -> Vec<(PathBuf, usize)> {
     let Some(sloc_lines) = sloc_by_file.get(file) else {
         return Vec::new();

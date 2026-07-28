@@ -41,15 +41,15 @@ fn run<I>(raw_args: I) -> Result<ExitCode, String>
 where
     I: IntoIterator<Item = String>,
 {
-    let cli = match parse_args(raw_args) {
-        Ok(cli) => cli,
+    let command = match parse_args(raw_args) {
+        Ok(command) => command,
         Err(ParseArgsError::Help(message)) => {
             print!("{message}");
             return Ok(ExitCode::SUCCESS);
         }
         Err(ParseArgsError::Usage(message)) => return Err(message),
     };
-    match cli.command {
+    match command {
         Command::Check(options) => run_check(&options),
         Command::Rule(rule_id) => run_rule(&rule_id),
         Command::Version => {

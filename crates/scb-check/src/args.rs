@@ -21,11 +21,6 @@ pub enum Command {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Cli {
-    pub command: Command,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParseArgsError {
     Help(String),
     Usage(String),
@@ -69,7 +64,7 @@ enum OutputFormat {
     Json,
 }
 
-pub fn parse_args<I>(raw_args: I) -> Result<Cli, ParseArgsError>
+pub fn parse_args<I>(raw_args: I) -> Result<Command, ParseArgsError>
 where
     I: IntoIterator<Item = String>,
 {
@@ -78,22 +73,22 @@ where
         return Err(ParseArgsError::Usage("missing command".to_string()));
     }
     if args == ["--version"] {
-        return Ok(Cli {
-            command: Command::Version,
-        });
+        return Ok(Command::Version);
     }
 
     let mut clap_args = Vec::with_capacity(args.len() + 1);
     clap_args.push("scb-check".to_string());
     clap_args.extend(args);
     let output_json = output_json_from_args(&clap_args[1..]);
-    let mut cli: Cli = RawCli::try_parse_from(clap_args)
-        .map(Into::into)
-        .map_err(|error| parse_error(&error))?;
-    if let (Some(output_json), Command::Check(options)) = (output_json, &mut cli.command) {
+    let raw_cli = RawCli::try_parse_from(clap_args).map_err(|error| parse_error(&error))?;
+    let mut command = match raw_cli.command {
+        RawCommand::Check(options) => Command::Check(options.into()),
+        RawCommand::Rule { rule_id } => Command::Rule(rule_id),
+    };
+    if let (Some(output_json), Command::Check(options)) = (output_json, &mut command) {
         options.output_json = output_json;
     }
-    Ok(cli)
+    Ok(command)
 }
 
 fn parse_error(error: &clap::Error) -> ParseArgsError {
@@ -101,16 +96,6 @@ fn parse_error(error: &clap::Error) -> ParseArgsError {
         ParseArgsError::Help(error.to_string())
     } else {
         ParseArgsError::Usage(error.to_string())
-    }
-}
-
-impl From<RawCli> for Cli {
-    fn from(raw: RawCli) -> Self {
-        let command = match raw.command {
-            RawCommand::Check(options) => Command::Check(options.into()),
-            RawCommand::Rule { rule_id } => Command::Rule(rule_id),
-        };
-        Self { command }
     }
 }
 
@@ -199,7 +184,7 @@ mod tests {
             .map(str::to_string),
         )
         .expect("args should parse");
-        let Command::Check(human_options) = human.command else {
+        let Command::Check(human_options) = human else {
             panic!("expected check command");
         };
         assert!(!human_options.output_json);
@@ -217,7 +202,7 @@ mod tests {
             .map(str::to_string),
         )
         .expect("args should parse");
-        let Command::Check(json_options) = json.command else {
+        let Command::Check(json_options) = json else {
             panic!("expected check command");
         };
         assert!(json_options.output_json);
@@ -227,11 +212,11 @@ mod tests {
     fn rule_and_version_commands_parse() {
         let rule = parse_args(["rule", "trivial-wrapper"].into_iter().map(str::to_string))
             .expect("rule command should parse");
-        assert_eq!(rule.command, Command::Rule("trivial-wrapper".to_string()));
+        assert_eq!(rule, Command::Rule("trivial-wrapper".to_string()));
 
         let version = parse_args(std::iter::once("--version").map(str::to_string))
             .expect("version should parse");
-        assert_eq!(version.command, Command::Version);
+        assert_eq!(version, Command::Version);
     }
 
     #[test]

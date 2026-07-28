@@ -41,7 +41,9 @@ pub fn function_clone_candidate(
         sloc: sloc_lines
             .range(function.start_line..=function.end_line)
             .count(),
-        group_hash: clone_group_hash(fingerprint),
+        group_hash: blake3::hash(fingerprint.join("\n").as_bytes())
+            .to_hex()
+            .to_string(),
         first_lines,
     })
 }
@@ -88,12 +90,6 @@ pub fn detect_clones(candidates: Vec<CloneCandidate>) -> Vec<CloneBlock> {
         ))
     });
     clones
-}
-
-fn clone_group_hash(body_lines: &[String]) -> String {
-    blake3::hash(body_lines.join("\n").as_bytes())
-        .to_hex()
-        .to_string()
 }
 
 #[cfg(test)]
