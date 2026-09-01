@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use ignore::{DirEntry, WalkBuilder};
+use thiserror::Error;
 
 use crate::config::Config;
 use crate::model::{Language, SourceFile};
@@ -24,6 +25,36 @@ const DEFAULT_EXCLUDED_DIRS: &[&str] = &[
     "target",
 ];
 
+#[derive(Debug, Error)]
+pub enum WalkError {
+    #[error("path does not exist: {}", path.display())]
+    MissingPath { path: PathBuf },
+    #[error("not a supported source file: {}", path.display())]
+    UnsupportedFile { path: PathBuf },
+    #[error("failed to resolve {}: {source}", path.display())]
+    ResolvePath {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("failed to walk sources: {source}")]
+    Walk {
+        #[source]
+        source: ignore::Error,
+    },
+    #[error("invalid exclude pattern {pattern:?}: {source}")]
+    InvalidExcludePattern {
+        pattern: String,
+        #[source]
+        source: globset::Error,
+    },
+    #[error("invalid exclude patterns: {source}")]
+    InvalidExcludePatterns {
+        #[source]
+        source: globset::Error,
+    },
+}
+
 /// Discover supported source files below a path after applying configuration exclusions.
 ///
 /// Returned records own canonical paths because parsing and reporting outlive the borrowed CLI
@@ -32,9 +63,11 @@ pub fn discover_sources(
     path: &Path,
     config: &Config,
     include_all: bool,
-) -> Result<Vec<SourceFile>, String> {
+) -> Result<Vec<SourceFile>, WalkError> {
     if !path.exists() {
-        return Err(format!("path does not exist: {}", path.display()));
+        return Err(WalkError::MissingPath {
+            path: path.to_path_buf(),
+        });
     }
 
     if path.is_file() {
@@ -45,16 +78,17 @@ pub fn discover_sources(
     let exclude_set = user_exclude_set(&config.exclude)?;
     let mut files = Vec::new();
     for entry in source_walk(&root, include_all) {
-        let entry = entry.map_err(|error| error.to_string())?;
+        let entry = entry.map_err(|source| WalkError::Walk { source })?;
         push_source_entry(entry.path(), config, &exclude_set, &mut files)?;
     }
     files.sort_by(|left, right| left.path.cmp(&right.path));
     Ok(files)
 }
 
-fn discover_explicit_file(path: &Path) -> Result<Vec<SourceFile>, String> {
-    let language = language_for_path(path)
-        .ok_or_else(|| format!("not a supported source file: {}", path.display()))?;
+fn discover_explicit_file(path: &Path) -> Result<Vec<SourceFile>, WalkError> {
+    let language = language_for_path(path).ok_or_else(|| WalkError::UnsupportedFile {
+        path: path.to_path_buf(),
+    })?;
     Ok(vec![SourceFile {
         path: absolute(path)?,
         language,
@@ -94,7 +128,7 @@ fn push_source_entry(
     config: &Config,
     exclude_set: &GlobSet,
     files: &mut Vec<SourceFile>,
-) -> Result<(), String> {
+) -> Result<(), WalkError> {
     let Some(language) = language_for_path(path) else {
         return Ok(());
     };
@@ -115,21 +149,26 @@ fn language_for_path(path: &Path) -> Option<Language> {
     }
 }
 
-fn absolute(path: &Path) -> Result<PathBuf, String> {
+fn absolute(path: &Path) -> Result<PathBuf, WalkError> {
     path.canonicalize()
-        .map_err(|error| format!("failed to resolve {}: {error}", path.display()))
+        .map_err(|source| WalkError::ResolvePath {
+            path: path.to_path_buf(),
+            source,
+        })
 }
 
-fn user_exclude_set(patterns: &[String]) -> Result<GlobSet, String> {
+fn user_exclude_set(patterns: &[String]) -> Result<GlobSet, WalkError> {
     let mut builder = GlobSetBuilder::new();
     for pattern in patterns {
-        let glob = Glob::new(pattern)
-            .map_err(|error| format!("invalid exclude pattern {pattern:?}: {error}"))?;
+        let glob = Glob::new(pattern).map_err(|source| WalkError::InvalidExcludePattern {
+            pattern: pattern.clone(),
+            source,
+        })?;
         builder.add(glob);
     }
     builder
         .build()
-        .map_err(|error| format!("invalid exclude patterns: {error}"))
+        .map_err(|source| WalkError::InvalidExcludePatterns { source })
 }
 
 fn is_user_excluded(path: &Path, config: &Config, exclude_set: &GlobSet) -> bool {
@@ -217,6 +256,6 @@ mod tests {
 
         let error = discover_sources(&source, &config, false).expect_err("source should fail");
 
-        assert!(error.contains("not a supported source file"));
+        assert!(error.to_string().contains("not a supported source file"));
     }
 }

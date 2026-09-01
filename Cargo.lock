@@ -693,6 +693,7 @@ dependencies = [
  "predicates",
  "serde",
  "serde_json",
+ "thiserror",
  "toml",
  "tree-sitter",
  "tree-sitter-python",

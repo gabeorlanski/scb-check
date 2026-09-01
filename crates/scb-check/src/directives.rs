@@ -1,5 +1,8 @@
 use std::collections::BTreeSet;
+use std::fmt;
 use std::path::{Path, PathBuf};
+
+use thiserror::Error;
 
 use crate::languages::{CommentSpan, directive_text};
 use crate::model::{AstGrepFinding, Function, Language, StructuralFinding};
@@ -23,6 +26,49 @@ pub struct ParsedDirectives {
     pub boundaries: Vec<BoundaryDirective>,
 }
 
+#[derive(Debug, Error)]
+enum DirectiveIssue {
+    #[error("{}:{line}: scbc ignore has no target code line", path.display())]
+    NoTargetCode { path: PathBuf, line: usize },
+    #[error("{}:{line}: wildcard ignores are not supported", path.display())]
+    WildcardIgnore { path: PathBuf, line: usize },
+    #[error("{}:{line}: unknown rule id: {rule_id}", path.display())]
+    UnknownRule {
+        path: PathBuf,
+        line: usize,
+        rule_id: String,
+    },
+    #[error("{}:{line}: scbc ignore requires at least one rule id", path.display())]
+    MissingRuleIds { path: PathBuf, line: usize },
+    #[error("{}:{line}: scbc boundary must be inside a function body", path.display())]
+    BoundaryOutsideFunction { path: PathBuf, line: usize },
+}
+
+#[derive(Debug)]
+pub struct DirectiveError {
+    issues: Vec<DirectiveIssue>,
+}
+
+impl DirectiveError {
+    const fn from_issues(issues: Vec<DirectiveIssue>) -> Self {
+        Self { issues }
+    }
+}
+
+impl fmt::Display for DirectiveError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (index, issue) in self.issues.iter().enumerate() {
+            if index > 0 {
+                writeln!(formatter)?;
+            }
+            write!(formatter, "{issue}")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for DirectiveError {}
+
 /// Parse supported source directives from the comments in one source file.
 ///
 /// Parsed directives own their file paths and rule identifiers because filtering occurs later,
@@ -33,12 +79,12 @@ pub fn parse_source_directives(
     source: &str,
     comments: &[CommentSpan],
     valid_rule_ids: &BTreeSet<String>,
-) -> Result<ParsedDirectives, String> {
+) -> Result<ParsedDirectives, DirectiveError> {
     let lines: Vec<&str> = source.lines().collect();
     let code_lines = code_lines(&lines, comments);
     let mut ignores = Vec::new();
     let mut boundaries = Vec::new();
-    let mut errors = Vec::new();
+    let mut issues = Vec::new();
 
     for comment in comments {
         let has_code_before = has_code_before_comment(&lines, comment);
@@ -56,17 +102,17 @@ pub fn parse_source_directives(
             Ok(Some(ParsedDirectiveLine::Ignore(ignore))) => ignores.push(ignore),
             Ok(Some(ParsedDirectiveLine::Boundary(boundary))) => boundaries.push(boundary),
             Ok(None) => {}
-            Err(message) => errors.push(message),
+            Err(issue) => issues.push(issue),
         }
     }
 
-    if errors.is_empty() {
+    if issues.is_empty() {
         Ok(ParsedDirectives {
             ignores,
             boundaries,
         })
     } else {
-        Err(errors.join("\n"))
+        Err(DirectiveError::from_issues(issues))
     }
 }
 
@@ -82,7 +128,7 @@ fn parse_directive_comment(
     has_code_before: bool,
     code_lines: &BTreeSet<usize>,
     valid_rule_ids: &BTreeSet<String>,
-) -> Result<Option<ParsedDirectiveLine>, String> {
+) -> Result<Option<ParsedDirectiveLine>, DirectiveIssue> {
     if !comment_text.starts_with("scbc") {
         return Ok(None);
     }
@@ -115,7 +161,7 @@ pub fn filter_ast_grep_findings(
     boundaries: &[BoundaryDirective],
     functions: &[Function],
     include_all: bool,
-) -> Result<Vec<AstGrepFinding>, String> {
+) -> Result<Vec<AstGrepFinding>, DirectiveError> {
     let boundary_ranges = boundary_ranges(boundaries, functions)?;
     if include_all {
         return Ok(findings);
@@ -205,7 +251,7 @@ fn parse_ignore(
     has_code_before: bool,
     code_lines: &BTreeSet<usize>,
     valid_rule_ids: &BTreeSet<String>,
-) -> Result<IgnoreDirective, String> {
+) -> Result<IgnoreDirective, DirectiveIssue> {
     let rule_ids = validated_rule_ids(path, directive_line, raw_rule_ids, valid_rule_ids)?;
     let target_line = if has_code_before {
         Some(directive_line)
@@ -213,11 +259,10 @@ fn parse_ignore(
         code_lines.range((directive_line + 1)..).next().copied()
     };
     let Some(target_line) = target_line else {
-        return Err(format!(
-            "{}:{}: scbc ignore has no target code line",
-            path.display(),
-            directive_line
-        ));
+        return Err(DirectiveIssue::NoTargetCode {
+            path: path.to_path_buf(),
+            line: directive_line,
+        });
     };
     Ok(IgnoreDirective {
         file: path.to_path_buf(),
@@ -231,7 +276,7 @@ fn validated_rule_ids(
     line_number: usize,
     raw_rule_ids: &str,
     valid_rule_ids: &BTreeSet<String>,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<String>, DirectiveIssue> {
     let mut rule_ids = Vec::new();
     for rule_id in raw_rule_ids.split(',').map(str::trim) {
         if rule_id.is_empty() || rule_ids.iter().any(|existing| existing == rule_id) {
@@ -249,32 +294,33 @@ fn validate_rule_id(
     line_number: usize,
     rule_id: &str,
     valid_rule_ids: &BTreeSet<String>,
-) -> Result<(), String> {
+) -> Result<(), DirectiveIssue> {
     if rule_id == "*" {
-        return Err(format!(
-            "{}:{}: wildcard ignores are not supported",
-            path.display(),
-            line_number
-        ));
+        return Err(DirectiveIssue::WildcardIgnore {
+            path: path.to_path_buf(),
+            line: line_number,
+        });
     }
     if !valid_rule_ids.contains(rule_id) {
-        return Err(format!(
-            "{}:{}: unknown rule id: {}",
-            path.display(),
-            line_number,
-            rule_id
-        ));
+        return Err(DirectiveIssue::UnknownRule {
+            path: path.to_path_buf(),
+            line: line_number,
+            rule_id: rule_id.to_string(),
+        });
     }
     Ok(())
 }
 
-fn require_rule_ids(path: &Path, line_number: usize, rule_ids: &[String]) -> Result<(), String> {
+fn require_rule_ids(
+    path: &Path,
+    line_number: usize,
+    rule_ids: &[String],
+) -> Result<(), DirectiveIssue> {
     if rule_ids.is_empty() {
-        return Err(format!(
-            "{}:{}: scbc ignore requires at least one rule id",
-            path.display(),
-            line_number
-        ));
+        return Err(DirectiveIssue::MissingRuleIds {
+            path: path.to_path_buf(),
+            line: line_number,
+        });
     }
     Ok(())
 }
@@ -282,9 +328,9 @@ fn require_rule_ids(path: &Path, line_number: usize, rule_ids: &[String]) -> Res
 fn boundary_ranges(
     boundaries: &[BoundaryDirective],
     functions: &[Function],
-) -> Result<Vec<(PathBuf, usize, usize)>, String> {
+) -> Result<Vec<(PathBuf, usize, usize)>, DirectiveError> {
     let mut ranges = Vec::new();
-    let mut errors = Vec::new();
+    let mut issues = Vec::new();
     for boundary in boundaries {
         match containing_function(boundary, functions) {
             Some(function) => ranges.push((
@@ -292,17 +338,16 @@ fn boundary_ranges(
                 function.start_line,
                 function.end_line,
             )),
-            None => errors.push(format!(
-                "{}:{}: scbc boundary must be inside a function body",
-                boundary.file.display(),
-                boundary.directive_line
-            )),
+            None => issues.push(DirectiveIssue::BoundaryOutsideFunction {
+                path: boundary.file.clone(),
+                line: boundary.directive_line,
+            }),
         }
     }
-    if errors.is_empty() {
+    if issues.is_empty() {
         Ok(ranges)
     } else {
-        Err(errors.join("\n"))
+        Err(DirectiveError::from_issues(issues))
     }
 }
 
@@ -438,7 +483,7 @@ value = 1
             let error =
                 analyze_dir(&root, false, include_all, None).expect_err("directive should fail");
 
-            assert!(error.contains(expected));
+            assert!(error.to_string().contains(expected));
         }
     }
 

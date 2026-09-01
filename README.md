@@ -30,7 +30,7 @@ uv add scb-check     # as a dependency elsewhere
 
 Wheels install the compiled Rust binary directly as the `scb-check` script, so `uvx scb-check` runs the Rust CLI without a Python runtime shim.
 
-Bundled ast-grep rules run in process through Rust ast-grep crates. No external `sg` executable is required for the Rust cutover path.
+Bundled ast-grep rules run in process through Rust ast-grep crates. No external `sg` executable is required.
 
 ## Usage
 
@@ -47,7 +47,7 @@ scb-check check PATH --min-duplicate-lines N  # show duplicate groups with at le
 scb-check rule RULE_ID                  # print YAML or metadata for a specific rule
 ```
 
-`PATH` may be a file or directory. The first Rust cutover scans Python (`.py`, `.pyw`) and Rust (`.rs`) source files. Directory discovery respects `.gitignore` globs by default; use `--include-all` to scan gitignored supported files too.
+`PATH` may be a file or directory. Supported source files are Python (`.py`, `.pyw`) and Rust (`.rs`). Directory discovery respects `.gitignore` globs by default; use `--include-all` to scan gitignored supported files too.
 
 ### JSON report fields
 
@@ -96,7 +96,7 @@ enabled = true
 
 Configured `exclude` patterns still apply when `--include-all` is used; only `.gitignore` file discovery is extended.
 
-Ast-grep slop rules are currently Python-only. Source directives are parsed from Python and Rust comments. JavaScript, TypeScript, Go, Zig, Haskell, and C++ are outside the first Rust cutover scan target set.
+Ast-grep slop rules are currently Python-only. Source directives are parsed from Python and Rust comments. JavaScript, TypeScript, Go, Zig, Haskell, and C++ are not supported scan targets.
 
 When using `pyproject.toml`, scb-check also includes excludes from:
 

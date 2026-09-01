@@ -2,6 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
+use thiserror::Error;
 use toml::Value;
 use toml::map::Map;
 
@@ -30,6 +31,43 @@ pub struct LowUseShortFunctionSettings {
     pub max_inline_caller_complexity: usize,
     pub max_inline_caller_cognitive_complexity: usize,
     pub max_inline_call_nesting: usize,
+}
+
+#[derive(Debug, Error)]
+pub enum ConfigError {
+    #[error("config path does not exist: {}", path.display())]
+    MissingPath { path: PathBuf },
+    #[error("failed to resolve {}: {source}", path.display())]
+    ResolvePath {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("failed to resolve config directory: {source}")]
+    ResolveConfigDirectory {
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("{}: failed to read config", path.display())]
+    Read {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("{}: failed to parse config: {source}", path.display())]
+    ParseToml {
+        path: PathBuf,
+        #[source]
+        source: toml::de::Error,
+    },
+    #[error("{}: failed to parse config: {source}", path.display())]
+    Deserialize {
+        path: PathBuf,
+        #[source]
+        source: toml::de::Error,
+    },
+    #[error("{key} must be >= {minimum}")]
+    ValueBelowMinimum { key: &'static str, minimum: usize },
 }
 
 #[derive(Debug, Deserialize)]
@@ -78,14 +116,20 @@ impl Default for RawLowUseShortFunctionSettings {
 
 impl Default for LowUseShortFunctionSettings {
     fn default() -> Self {
+        RawLowUseShortFunctionSettings::default().into()
+    }
+}
+
+impl From<RawLowUseShortFunctionSettings> for LowUseShortFunctionSettings {
+    fn from(raw: RawLowUseShortFunctionSettings) -> Self {
         Self {
-            enabled: false,
-            max_call_sites: DEFAULT_MAX_CALL_SITES,
-            max_function_sloc: DEFAULT_MAX_FUNCTION_SLOC,
-            max_inline_caller_sloc: DEFAULT_MAX_INLINE_CALLER_SLOC,
-            max_inline_caller_complexity: DEFAULT_MAX_INLINE_CALLER_COMPLEXITY,
-            max_inline_caller_cognitive_complexity: DEFAULT_MAX_INLINE_CALLER_COGNITIVE_COMPLEXITY,
-            max_inline_call_nesting: DEFAULT_MAX_INLINE_CALL_NESTING,
+            enabled: raw.enabled,
+            max_call_sites: raw.max_call_sites,
+            max_function_sloc: raw.max_function_sloc,
+            max_inline_caller_sloc: raw.max_inline_caller_sloc,
+            max_inline_caller_complexity: raw.max_inline_caller_complexity,
+            max_inline_caller_cognitive_complexity: raw.max_inline_caller_cognitive_complexity,
+            max_inline_call_nesting: raw.max_inline_call_nesting,
         }
     }
 }
@@ -106,10 +150,12 @@ impl Config {
 }
 
 /// Load an explicit configuration file or discover one from the current directory upward.
-pub fn load_config(override_path: Option<&Path>, cwd: &Path) -> Result<Config, String> {
+pub fn load_config(override_path: Option<&Path>, cwd: &Path) -> Result<Config, ConfigError> {
     if let Some(path) = override_path {
         if !path.exists() {
-            return Err(format!("config path does not exist: {}", path.display()));
+            return Err(ConfigError::MissingPath {
+                path: path.to_path_buf(),
+            });
         }
         return parse_config_file(path);
     }
@@ -120,10 +166,13 @@ pub fn load_config(override_path: Option<&Path>, cwd: &Path) -> Result<Config, S
     parse_config_file(&path)
 }
 
-fn discover_config(start: &Path) -> Result<Option<PathBuf>, String> {
+fn discover_config(start: &Path) -> Result<Option<PathBuf>, ConfigError> {
     let mut current = start
         .canonicalize()
-        .map_err(|error| format!("failed to resolve {}: {error}", start.display()))?;
+        .map_err(|source| ConfigError::ResolvePath {
+            path: start.to_path_buf(),
+            source,
+        })?;
     loop {
         if let Some(path) = config_file_in(&current)? {
             return Ok(Some(path));
@@ -135,7 +184,7 @@ fn discover_config(start: &Path) -> Result<Option<PathBuf>, String> {
     }
 }
 
-fn config_file_in(directory: &Path) -> Result<Option<PathBuf>, String> {
+fn config_file_in(directory: &Path) -> Result<Option<PathBuf>, ConfigError> {
     let scb_check_file = directory.join("scb-check.toml");
     if scb_check_file.is_file() {
         return Ok(Some(scb_check_file));
@@ -157,7 +206,7 @@ fn next_config_parent(directory: &Path) -> Option<PathBuf> {
     (parent != directory).then(|| parent.to_path_buf())
 }
 
-fn pyproject_has_compatible_config(path: &Path) -> Result<bool, String> {
+fn pyproject_has_compatible_config(path: &Path) -> Result<bool, ConfigError> {
     let raw = read_config(path)?;
     let document = parse_toml(path, &raw)?;
     Ok(value_at(&document, &["tool", "scb-check"]).is_some()
@@ -165,14 +214,14 @@ fn pyproject_has_compatible_config(path: &Path) -> Result<bool, String> {
         || table_at(&document, &["tool", "ty", "src"]).is_some())
 }
 
-fn parse_config_file(path: &Path) -> Result<Config, String> {
+fn parse_config_file(path: &Path) -> Result<Config, ConfigError> {
     let raw = read_config(path)?;
     let document = parse_toml(path, &raw)?;
     let base_dir = path
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .canonicalize()
-        .map_err(|error| format!("failed to resolve config directory: {error}"))?;
+        .map_err(|source| ConfigError::ResolveConfigDirectory { source })?;
 
     if !is_pyproject(path) {
         return parse_scb_config(path, document, base_dir);
@@ -192,7 +241,7 @@ fn parse_pyproject_config(
     path: &Path,
     document: &Value,
     base_dir: PathBuf,
-) -> Result<Config, String> {
+) -> Result<Config, ConfigError> {
     if let Some(scb_value) = value_at(document, &["tool", "scb-check"]) {
         parse_scb_config(path, scb_value.clone(), base_dir)
     } else {
@@ -205,10 +254,13 @@ fn parse_pyproject_config(
     }
 }
 
-fn parse_scb_config(path: &Path, value: Value, base_dir: PathBuf) -> Result<Config, String> {
+fn parse_scb_config(path: &Path, value: Value, base_dir: PathBuf) -> Result<Config, ConfigError> {
     let raw = value
         .try_into::<RawScbConfig>()
-        .map_err(|error| format!("{}: failed to parse config: {error}", path.display()))?;
+        .map_err(|source| ConfigError::Deserialize {
+            path: path.to_path_buf(),
+            source,
+        })?;
     let low_use_short_function = low_use_settings(&raw.low_use_short_function)?;
     Ok(Config {
         exclude: norm_patterns(raw.exclude),
@@ -220,7 +272,7 @@ fn parse_scb_config(path: &Path, value: Value, base_dir: PathBuf) -> Result<Conf
 
 fn low_use_settings(
     raw: &RawLowUseShortFunctionSettings,
-) -> Result<LowUseShortFunctionSettings, String> {
+) -> Result<LowUseShortFunctionSettings, ConfigError> {
     Ok(LowUseShortFunctionSettings {
         enabled: raw.enabled,
         max_call_sites: min_int_value("max-call-sites", raw.max_call_sites, 1)?,
@@ -266,13 +318,18 @@ fn python_tool_excludes(document: &Value) -> Vec<String> {
     patterns
 }
 
-fn read_config(path: &Path) -> Result<String, String> {
-    fs::read_to_string(path).map_err(|_| format!("{}: failed to read config", path.display()))
+fn read_config(path: &Path) -> Result<String, ConfigError> {
+    fs::read_to_string(path).map_err(|source| ConfigError::Read {
+        path: path.to_path_buf(),
+        source,
+    })
 }
 
-fn parse_toml(path: &Path, raw: &str) -> Result<Value, String> {
-    toml::from_str::<Value>(raw)
-        .map_err(|error| format!("{}: failed to parse config: {error}", path.display()))
+fn parse_toml(path: &Path, raw: &str) -> Result<Value, ConfigError> {
+    toml::from_str::<Value>(raw).map_err(|source| ConfigError::ParseToml {
+        path: path.to_path_buf(),
+        source,
+    })
 }
 
 fn table_at<'a>(document: &'a Value, path: &[&str]) -> Option<&'a Map<String, Value>> {
@@ -295,9 +352,13 @@ fn tool_string_list_value(table: &Map<String, Value>, key: &str) -> Option<Vec<S
         .collect()
 }
 
-fn min_int_value(key: &str, value: usize, minimum: usize) -> Result<usize, String> {
+const fn min_int_value(
+    key: &'static str,
+    value: usize,
+    minimum: usize,
+) -> Result<usize, ConfigError> {
     if value < minimum {
-        return Err(format!("{key} must be >= {minimum}"));
+        return Err(ConfigError::ValueBelowMinimum { key, minimum });
     }
     Ok(value)
 }
@@ -358,7 +419,9 @@ mod tests {
         let config_path = root.join("scb-check.toml");
         write(&config_path, content);
 
-        load_config(Some(&config_path), &root).expect_err("config should fail")
+        load_config(Some(&config_path), &root)
+            .expect_err("config should fail")
+            .to_string()
     }
 
     #[test]
@@ -411,6 +474,6 @@ enabled = true
 
         let error = load_config(Some(&config_path), &root).expect_err("invalid config should fail");
 
-        assert!(error.contains("failed to parse config"));
+        assert!(error.to_string().contains("failed to parse config"));
     }
 }

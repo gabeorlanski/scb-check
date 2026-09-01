@@ -68,12 +68,12 @@ fn append_clone_entries(
     min_duplicate_lines: Option<usize>,
 ) {
     for group in clone_groups(&report.clones) {
-        let line_count = group.anchor().sloc;
+        let line_count = group.anchor.sloc;
         if min_duplicate_lines.is_some_and(|minimum| line_count < minimum) {
             continue;
         }
         entries.push(RenderedEntry {
-            key: render_key(&group.anchor().file, group.anchor().start_line, 0),
+            key: render_key(&group.anchor.file, group.anchor.start_line, 0),
             text: render_clone_group(&group, line_count),
         });
     }
@@ -187,15 +187,13 @@ fn clone_groups(clones: &[CloneBlock]) -> Vec<CloneGroup> {
     let mut groups: Vec<CloneGroup> = Vec::new();
     for clone in clones {
         match groups.last_mut() {
-            Some(group) if group.group_hash() == clone.group_hash => group.rest.push(clone),
+            Some(group) if group.anchor.group_hash == clone.group_hash => group.rest.push(clone),
             _ => groups.push(CloneGroup::new(clone)),
         }
     }
     groups.sort_by(|left, right| {
-        let left_anchor = left.anchor();
-        let right_anchor = right.anchor();
-        (left_anchor.file.as_os_str(), left_anchor.start_line)
-            .cmp(&(right_anchor.file.as_os_str(), right_anchor.start_line))
+        (left.anchor.file.as_os_str(), left.anchor.start_line)
+            .cmp(&(right.anchor.file.as_os_str(), right.anchor.start_line))
     });
     groups
 }
@@ -213,33 +211,23 @@ impl CloneGroup {
             rest: Vec::new(),
         }
     }
-
-    const fn anchor(&self) -> &CloneBlock {
-        &self.anchor
-    }
-
-    fn group_hash(&self) -> &str {
-        &self.anchor.group_hash
-    }
-
-    fn iter(&self) -> impl Iterator<Item = &CloneBlock> {
-        std::iter::once(&self.anchor).chain(self.rest.iter())
-    }
 }
 
 fn render_clone_group(group: &CloneGroup, line_count: usize) -> String {
-    let anchor = group.anchor();
-    let line_number_width = group
-        .iter()
+    let line_number_width = std::iter::once(&group.anchor)
+        .chain(group.rest.iter())
         .map(|clone| clone.end_line.to_string().len())
         .max()
         .unwrap_or(1);
     let pad = " ".repeat(line_number_width);
     let mut lines = vec![format!(
         "duplicate-structure: duplicated block ({} lines, {} instances)",
-        line_count, anchor.instance_count
+        line_count, group.anchor.instance_count
     )];
-    for (index, clone) in group.iter().enumerate() {
+    for (index, clone) in std::iter::once(&group.anchor)
+        .chain(group.rest.iter())
+        .enumerate()
+    {
         if index > 0 {
             lines.push(format!("{pad} ┆"));
         }

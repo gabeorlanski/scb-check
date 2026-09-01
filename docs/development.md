@@ -1,10 +1,10 @@
 # Development
 
-This guide summarizes the current implementation status and the preferred approach for common changes.
+This guide summarizes the implementation and the preferred approach for common changes.
 
 ## Current status
 
-`scb-check` is cutting over to a Rust CLI with two public commands:
+`scb-check` is a Rust CLI with two public commands:
 
 - `scb-check check PATH` reports human-readable flags or JSON scores.
 - `scb-check rule RULE_ID` prints bundled `ast-grep` YAML or structural rule metadata.
@@ -13,7 +13,7 @@ The Python package is only a wheel delivery vehicle for `uvx`; wheels install th
 
 Implemented analysis paths:
 
-- Source discovery for the first-cutover languages: Python (`.py`, `.pyw`) and Rust (`.rs`).
+- Source discovery for supported languages: Python (`.py`, `.pyw`) and Rust (`.rs`).
 - Tree-sitter parsing into shared function, import/use binding, call-site, `CallGraph`, SLOC, complexity, comment, and clone facts.
 - Parser-derived `SLOC` accounting shared by verbosity, clone line counts, structural spans, and erosion mass.
 - Duplicate-structure detection by normalized parser-body hashing for Python and Rust.
@@ -90,21 +90,21 @@ Pay special attention to:
 
 ## Verification
 
-Run the project workflow after changes:
-
-```bash
-uv run ruff check --fix .
-uv run ty check .
-uv run vulture
-cargo run -p scb-check -- check .
-```
-
-For Rust cutover changes, also run:
+Run the Rust workflow after Rust changes:
 
 ```bash
 cargo fmt --check
 cargo test --all --all-features
 cargo clippy --all --all-targets --all-features -- -D warnings
+cargo run -p scb-check -- check .
+```
+
+Run the Python packaging workflow after packaging or build-hook changes:
+
+```bash
+uv run ruff check hatch_build.py
+uv run ty check hatch_build.py
+uv run vulture
 ```
 
 Use focused tests while iterating, then run the full workflow before presenting results. Keep tests behavioral: assert scores, exit codes, report fields, and rendering prefixes instead of internal call order.

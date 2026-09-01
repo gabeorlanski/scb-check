@@ -6,15 +6,18 @@ use crate::astgrep::AstGrepCatalog;
 use crate::clones::{CloneCandidate, detect_clones, function_clone_candidate};
 use crate::config::LowUseShortFunctionSettings;
 use crate::directives::{
-    BoundaryDirective, IgnoreDirective, filter_ast_grep_findings, filter_structural_findings,
-    parse_source_directives,
+    BoundaryDirective, DirectiveError, IgnoreDirective, filter_ast_grep_findings,
+    filter_structural_findings, parse_source_directives,
 };
-use crate::languages::{ast_grep_language, function_lines, lower_function, parse_syntax_at_path};
+use crate::languages::{
+    ParseError, ast_grep_language, function_lines, lower_function, parse_syntax_at_path,
+};
 use crate::model::{
     AstGrepFinding, CallGraph, CallSite, CloneBlock, Function, FunctionId, ImportBinding, Language,
     LanguageSyntaxSummary, Report, SourceFile, SourceLines, StructuralFinding,
 };
 use crate::rules::{run_structural_rules, structural_rule_ids};
+use thiserror::Error;
 
 #[derive(Debug)]
 struct ParsedFile {
@@ -62,10 +65,32 @@ struct FunctionSummary {
     high_cog_mass: f64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 enum ParseFileError {
-    Directive(String),
-    Parse(String),
+    #[error("{}: {source}", path.display())]
+    Read {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("{}: {source}", path.display())]
+    Syntax {
+        path: PathBuf,
+        #[source]
+        source: ParseError,
+    },
+    #[error(transparent)]
+    Directive(#[from] DirectiveError),
+}
+
+#[derive(Debug, Error)]
+pub enum AnalyzeError {
+    #[error(transparent)]
+    AstGrep(#[from] crate::astgrep::AstGrepError),
+    #[error(transparent)]
+    Directive(#[from] DirectiveError),
+    #[error("duplicate rule id: {id}")]
+    DuplicateRuleId { id: String },
 }
 
 /// Analyze discovered source files into one score-bearing report.
@@ -77,7 +102,7 @@ pub fn analyze(
     disable_sg: bool,
     include_all: bool,
     low_use_short_function: &LowUseShortFunctionSettings,
-) -> Result<Report, String> {
+) -> Result<Report, AnalyzeError> {
     let ast_grep_catalog = AstGrepCatalog::load()?;
     let valid_rule_ids = valid_rule_ids(&ast_grep_catalog)?;
     let parsed_files = parse_files(
@@ -304,7 +329,7 @@ fn parse_files(
     include_all: bool,
     valid_rule_ids: &BTreeSet<String>,
     ast_grep_catalog: &AstGrepCatalog,
-) -> Result<Vec<ParsedFile>, String> {
+) -> Result<Vec<ParsedFile>, AnalyzeError> {
     let mut parsed_files = Vec::new();
     for file in files {
         match parse_file(
@@ -315,9 +340,9 @@ fn parse_files(
             ast_grep_catalog,
         ) {
             Ok(parsed) => parsed_files.push(parsed),
-            Err(ParseFileError::Directive(message)) => return Err(message),
-            Err(ParseFileError::Parse(message)) => {
-                eprintln!("failed to parse file: {message}");
+            Err(ParseFileError::Directive(error)) => return Err(error.into()),
+            Err(error @ (ParseFileError::Read { .. } | ParseFileError::Syntax { .. })) => {
+                eprintln!("failed to parse file: {error}");
             }
         }
     }
@@ -371,12 +396,18 @@ fn parse_file(
     valid_rule_ids: &BTreeSet<String>,
     ast_grep_catalog: &AstGrepCatalog,
 ) -> Result<ParsedFile, ParseFileError> {
-    let source = fs::read_to_string(&file.path)
-        .map_err(|error| ParseFileError::Parse(format!("{}: {error}", file.path.display())))?;
+    let source = fs::read_to_string(&file.path).map_err(|source| ParseFileError::Read {
+        path: file.path.clone(),
+        source,
+    })?;
     let lines: Vec<&str> = source.lines().collect();
-    let syntax = parse_syntax_at_path(file.language, &file.path, &source)
-        .map_err(|error| ParseFileError::Parse(format!("{}: {error}", file.path.display())))?;
-    let sloc_lines = syntax.sloc_lines.clone();
+    let syntax = parse_syntax_at_path(file.language, &file.path, &source).map_err(|source| {
+        ParseFileError::Syntax {
+            path: file.path.clone(),
+            source,
+        }
+    })?;
+    let sloc_lines = &syntax.sloc_lines;
     let parsed_directives = parse_source_directives(
         file.language,
         &file.path,
@@ -388,7 +419,7 @@ fn parse_file(
     let functions: Vec<Function> = syntax
         .functions
         .iter()
-        .map(|span| lower_function(file.language, &file.path, span, &lines, &sloc_lines))
+        .map(|span| lower_function(file.language, &file.path, span, &lines, sloc_lines))
         .collect();
     let clone_candidates = functions
         .iter()
@@ -398,7 +429,7 @@ fn parse_file(
                 function,
                 &span.clone_fingerprint,
                 function_lines(span, &lines),
-                &sloc_lines,
+                sloc_lines,
             )
         })
         .collect();
@@ -412,7 +443,7 @@ fn parse_file(
 
     Ok(ParsedFile {
         language: file.language,
-        sloc_lines,
+        sloc_lines: syntax.sloc_lines,
         functions,
         clone_candidates,
         ast_grep_findings,
@@ -427,7 +458,7 @@ fn parse_file(
     })
 }
 
-fn valid_rule_ids(ast_grep_catalog: &AstGrepCatalog) -> Result<BTreeSet<String>, String> {
+fn valid_rule_ids(ast_grep_catalog: &AstGrepCatalog) -> Result<BTreeSet<String>, AnalyzeError> {
     let ast_ids: BTreeSet<String> = ast_grep_catalog.rule_ids().into_iter().collect();
     let structural_ids: BTreeSet<String> = structural_rule_ids()
         .into_iter()
@@ -440,9 +471,11 @@ fn valid_rule_ids(ast_grep_catalog: &AstGrepCatalog) -> Result<BTreeSet<String>,
 fn validate_unique_rule_ids(
     ast_ids: &BTreeSet<String>,
     structural_ids: &BTreeSet<String>,
-) -> Result<(), String> {
+) -> Result<(), AnalyzeError> {
     if let Some(duplicate) = ast_ids.intersection(structural_ids).next() {
-        return Err(format!("duplicate rule id: {duplicate}"));
+        return Err(AnalyzeError::DuplicateRuleId {
+            id: duplicate.clone(),
+        });
     }
     Ok(())
 }
@@ -663,7 +696,7 @@ fn branch(value: i32) -> i32 {
         let error =
             validate_unique_rule_ids(&ast_ids, &structural_ids).expect_err("ids should collide");
 
-        assert_eq!(error, "duplicate rule id: trivial-wrapper");
+        assert_eq!(error.to_string(), "duplicate rule id: trivial-wrapper");
     }
 
     #[test]

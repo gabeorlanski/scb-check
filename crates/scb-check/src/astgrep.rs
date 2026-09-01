@@ -4,6 +4,7 @@ use std::path::Path;
 
 use ast_grep_config::{GlobalRules, Severity, from_yaml_string};
 use ast_grep_language::{LanguageExt, SupportLang};
+use thiserror::Error;
 
 use crate::model::AstGrepFinding;
 
@@ -62,16 +63,34 @@ pub struct AstGrepCatalog {
     documents: Vec<RuleDocument>,
 }
 
+#[derive(Debug, Error)]
+pub enum AstGrepError {
+    #[error("failed to read ast-grep rule file {}: {source}", path.display())]
+    ReadRuleFile {
+        path: std::path::PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("failed to parse ast-grep rule file {name}: {source}")]
+    ParseRuleFile {
+        name: String,
+        #[source]
+        source: ast_grep_config::RuleConfigError,
+    },
+    #[error("duplicate rule id: {id}")]
+    DuplicateRuleId { id: String },
+}
+
 impl AstGrepCatalog {
     /// Load the bundled rules together with rules configured through the environment.
     ///
     /// The catalog owns parsed rules and their source documents so analysis can borrow one stable
     /// collection for every file instead of reparsing rule YAML in the per-file loop.
-    pub fn load() -> Result<Self, String> {
+    pub fn load() -> Result<Self, AstGrepError> {
         Self::from_texts(bundled_and_extra_rule_texts()?)
     }
 
-    fn from_texts(texts: Vec<RuleText>) -> Result<Self, String> {
+    fn from_texts(texts: Vec<RuleText>) -> Result<Self, AstGrepError> {
         let globals = GlobalRules::default();
         let mut rules = Vec::new();
         let mut documents = Vec::new();
@@ -80,7 +99,7 @@ impl AstGrepCatalog {
             extend_rules(&mut rules, &text, &globals)?;
             for document in rule_documents(&text) {
                 if !seen.insert(document.id.clone()) {
-                    return Err(format!("duplicate rule id: {}", document.id));
+                    return Err(AstGrepError::DuplicateRuleId { id: document.id });
                 }
                 documents.push(document);
             }
@@ -175,7 +194,7 @@ impl AstGrepCatalog {
 }
 
 /// Load and return the YAML document for an ast-grep rule identifier.
-pub fn ast_grep_rule_document(rule_id: &str) -> Result<Option<String>, String> {
+pub fn ast_grep_rule_document(rule_id: &str) -> Result<Option<String>, AstGrepError> {
     Ok(AstGrepCatalog::load()?.rule_document(rule_id))
 }
 
@@ -204,7 +223,7 @@ fn document_min_file_count(document: &str) -> Option<usize> {
     None
 }
 
-fn bundled_and_extra_rule_texts() -> Result<Vec<RuleText>, String> {
+fn bundled_and_extra_rule_texts() -> Result<Vec<RuleText>, AstGrepError> {
     let mut texts = BUNDLED_RULES
         .iter()
         .map(|(name, yaml)| RuleText {
@@ -220,12 +239,10 @@ fn bundled_and_extra_rule_texts() -> Result<Vec<RuleText>, String> {
     Ok(texts)
 }
 
-fn extra_rule_text(path: &Path) -> Result<RuleText, String> {
-    let yaml = fs::read_to_string(path).map_err(|error| {
-        format!(
-            "failed to read ast-grep rule file {}: {error}",
-            path.display()
-        )
+fn extra_rule_text(path: &Path) -> Result<RuleText, AstGrepError> {
+    let yaml = fs::read_to_string(path).map_err(|source| AstGrepError::ReadRuleFile {
+        path: path.to_path_buf(),
+        source,
     })?;
     Ok(RuleText {
         name: path.display().to_string(),
@@ -266,9 +283,13 @@ fn extend_rules(
     rules: &mut Vec<ast_grep_config::RuleConfig<SupportLang>>,
     text: &RuleText,
     globals: &GlobalRules,
-) -> Result<(), String> {
-    let mut parsed = from_yaml_string::<SupportLang>(&text.yaml, globals)
-        .map_err(|error| format!("failed to parse ast-grep rule file {}: {error}", text.name))?;
+) -> Result<(), AstGrepError> {
+    let mut parsed = from_yaml_string::<SupportLang>(&text.yaml, globals).map_err(|error| {
+        AstGrepError::ParseRuleFile {
+            name: text.name.clone(),
+            source: error,
+        }
+    })?;
     rules.append(&mut parsed);
     Ok(())
 }
@@ -340,7 +361,7 @@ rule:
             panic!("duplicate ids should fail");
         };
 
-        assert_eq!(error, "duplicate rule id: env-duplicate-rule");
+        assert_eq!(error.to_string(), "duplicate rule id: env-duplicate-rule");
     }
 
     #[test]
@@ -348,8 +369,12 @@ rule:
         let root = test_dir();
         let missing = root.join("missing-rules.yaml");
         let missing_error = extra_rule_text(&missing).expect_err("missing file should fail");
-        assert!(missing_error.contains("failed to read ast-grep rule file"));
-        assert!(missing_error.contains("missing-rules.yaml"));
+        assert!(
+            missing_error
+                .to_string()
+                .contains("failed to read ast-grep rule file")
+        );
+        assert!(missing_error.to_string().contains("missing-rules.yaml"));
 
         let invalid = root.join("invalid-rules.yaml");
         write(&invalid, ":\n");
@@ -357,8 +382,12 @@ rule:
         let Err(invalid_error) = AstGrepCatalog::from_texts(vec![text]) else {
             panic!("invalid yaml should fail");
         };
-        assert!(invalid_error.contains("failed to parse ast-grep rule file"));
-        assert!(invalid_error.contains("invalid-rules.yaml"));
+        assert!(
+            invalid_error
+                .to_string()
+                .contains("failed to parse ast-grep rule file")
+        );
+        assert!(invalid_error.to_string().contains("invalid-rules.yaml"));
     }
 
     #[test]

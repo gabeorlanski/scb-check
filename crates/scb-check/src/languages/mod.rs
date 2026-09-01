@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 
 use ast_grep_language::SupportLang;
+use thiserror::Error;
 use tree_sitter::{Node, Tree};
 
 use crate::model::{
@@ -50,6 +51,18 @@ pub struct ParsedSyntax {
     pub node_count: usize,
 }
 
+#[derive(Debug, Error)]
+pub enum ParseError {
+    #[error("failed to load {label} parser: {source}")]
+    LoadParser {
+        label: &'static str,
+        #[source]
+        source: tree_sitter::LanguageError,
+    },
+    #[error("failed to parse {label} source")]
+    ParseSource { label: &'static str },
+}
+
 pub trait LanguageParser {
     /// Return the language lowered by this adapter.
     fn language(&self) -> Language;
@@ -88,7 +101,7 @@ pub trait LanguageParser {
     ///
     /// The returned syntax owns all durable facts so callers can release the borrowed source text
     /// and tree-sitter tree after parsing.
-    fn parse(&self, path: &Path, source: &str) -> Result<ParsedSyntax, String>
+    fn parse(&self, path: &Path, source: &str) -> Result<ParsedSyntax, ParseError>
     where
         Self: Sized,
     {
@@ -112,11 +125,11 @@ impl BaseParser {
         language_parser: &P,
         path: &Path,
         source: &str,
-    ) -> Result<ParsedSyntax, String> {
+    ) -> Result<ParsedSyntax, ParseError> {
         let tree = self.parse_tree(source)?;
         let root = tree.root_node();
         if root.has_error() {
-            return Err(format!("failed to parse {} source", self.label));
+            return Err(ParseError::ParseSource { label: self.label });
         }
         let functions = Self::collect_functions(language_parser, source, root);
         let imports = language_parser.import_bindings(path, source, root);
@@ -131,14 +144,17 @@ impl BaseParser {
         })
     }
 
-    fn parse_tree(&self, source: &str) -> Result<Tree, String> {
+    fn parse_tree(&self, source: &str) -> Result<Tree, ParseError> {
         let mut parser = tree_sitter::Parser::new();
         parser
             .set_language(&self.language)
-            .map_err(|error| format!("failed to load {} parser: {error}", self.label))?;
+            .map_err(|error| ParseError::LoadParser {
+                label: self.label,
+                source: error,
+            })?;
         parser
             .parse(source, None)
-            .ok_or_else(|| format!("failed to parse {} source", self.label))
+            .ok_or(ParseError::ParseSource { label: self.label })
     }
 
     fn collect_functions<P: LanguageParser>(
@@ -285,7 +301,7 @@ impl BaseParser {
 }
 
 #[cfg(test)]
-fn parse_syntax(language: Language, source: &str) -> Result<ParsedSyntax, String> {
+fn parse_syntax(language: Language, source: &str) -> Result<ParsedSyntax, ParseError> {
     let filename = match language {
         Language::Python => "sample.py",
         Language::Rust => "sample.rs",
@@ -301,7 +317,7 @@ pub fn parse_syntax_at_path(
     language: Language,
     path: &Path,
     source: &str,
-) -> Result<ParsedSyntax, String> {
+) -> Result<ParsedSyntax, ParseError> {
     match language {
         Language::Python => python::PYTHON_PARSER.parse(path, source),
         Language::Rust => rust::RUST_PARSER.parse(path, source),

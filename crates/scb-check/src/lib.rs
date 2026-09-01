@@ -14,14 +14,40 @@ mod walk;
 
 use std::process::ExitCode;
 
-use analyze::analyze;
+use analyze::{AnalyzeError, analyze};
 use args::{CheckOptions, Command, ParseArgsError, parse_args};
-use astgrep::ast_grep_rule_document;
-use config::load_config;
+use astgrep::{AstGrepError, ast_grep_rule_document};
+use config::{ConfigError, load_config};
 use model::Report;
 use render::{render_human, render_json};
 use rules::structural_rule_document;
-use walk::discover_sources;
+use thiserror::Error;
+use walk::{WalkError, discover_sources};
+
+#[derive(Debug, Error)]
+enum CliError {
+    #[error("{message}")]
+    Usage { message: String },
+    #[error("failed to determine current directory: {source}")]
+    CurrentDirectory {
+        #[source]
+        source: std::io::Error,
+    },
+    #[error(transparent)]
+    Config(#[from] ConfigError),
+    #[error(transparent)]
+    Walk(#[from] WalkError),
+    #[error(transparent)]
+    Analyze(#[from] AnalyzeError),
+    #[error(transparent)]
+    AstGrep(#[from] AstGrepError),
+    #[error("no supported source files found at {}", path.display())]
+    NoSourceFiles { path: std::path::PathBuf },
+    #[error("no supported source files could be parsed at {}", path.display())]
+    NoParsedFiles { path: std::path::PathBuf },
+    #[error("rule not found: {rule_id}")]
+    UnknownRule { rule_id: String },
+}
 
 /// Run the `scb-check` CLI with already split command-line arguments.
 ///
@@ -33,14 +59,14 @@ where
 {
     match run(raw_args) {
         Ok(code) => code,
-        Err(message) => {
-            eprintln!("{message}");
+        Err(error) => {
+            eprintln!("{error}");
             ExitCode::from(2)
         }
     }
 }
 
-fn run<I>(raw_args: I) -> Result<ExitCode, String>
+fn run<I>(raw_args: I) -> Result<ExitCode, CliError>
 where
     I: IntoIterator<Item = String>,
 {
@@ -50,7 +76,7 @@ where
             print!("{message}");
             return Ok(ExitCode::SUCCESS);
         }
-        Err(ParseArgsError::Usage(message)) => return Err(message),
+        Err(ParseArgsError::Usage(message)) => return Err(CliError::Usage { message }),
     };
     match command {
         Command::Check(options) => run_check(&options),
@@ -62,8 +88,8 @@ where
     }
 }
 
-fn run_check(options: &CheckOptions) -> Result<ExitCode, String> {
-    let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
+fn run_check(options: &CheckOptions) -> Result<ExitCode, CliError> {
+    let cwd = std::env::current_dir().map_err(|source| CliError::CurrentDirectory { source })?;
     let config = load_config(options.config_path.as_deref(), &cwd)?;
     log_debug(
         options.verbosity,
@@ -95,10 +121,9 @@ fn run_check(options: &CheckOptions) -> Result<ExitCode, String> {
         );
     }
     if files.is_empty() {
-        return Err(format!(
-            "no supported source files found at {}",
-            options.path.display()
-        ));
+        return Err(CliError::NoSourceFiles {
+            path: options.path.clone(),
+        });
     }
 
     let report = analyze(
@@ -117,10 +142,9 @@ fn run_check(options: &CheckOptions) -> Result<ExitCode, String> {
         ),
     );
     if report.files_scanned == 0 {
-        return Err(format!(
-            "no supported source files could be parsed at {}",
-            options.path.display()
-        ));
+        return Err(CliError::NoParsedFiles {
+            path: options.path.clone(),
+        });
     }
 
     render_report(&report, options, config.context_lines);
@@ -158,11 +182,13 @@ fn exit_code_for_report(report: &Report) -> ExitCode {
     }
 }
 
-fn run_rule(rule_id: &str) -> Result<ExitCode, String> {
+fn run_rule(rule_id: &str) -> Result<ExitCode, CliError> {
     let Some(document) =
         ast_grep_rule_document(rule_id)?.or_else(|| structural_rule_document(rule_id))
     else {
-        return Err(format!("rule not found: {rule_id}"));
+        return Err(CliError::UnknownRule {
+            rule_id: rule_id.to_string(),
+        });
     };
     println!("{}", document.trim_end());
     Ok(ExitCode::SUCCESS)
@@ -170,6 +196,7 @@ fn run_rule(rule_id: &str) -> Result<ExitCode, String> {
 
 #[cfg(test)]
 mod test_support {
+    use super::CliError;
     use std::ffi::OsStr;
     use std::fs;
     use std::ops::Deref;
@@ -228,15 +255,15 @@ mod test_support {
         disable_sg: bool,
         include_all: bool,
         config_path: Option<&Path>,
-    ) -> Result<Report, String> {
+    ) -> Result<Report, CliError> {
         let config = load_config(config_path, root)?;
         let files = discover_sources(root, &config, include_all)?;
-        analyze(
+        Ok(analyze(
             &files,
             disable_sg,
             include_all,
             &config.low_use_short_function,
-        )
+        )?)
     }
 }
 
@@ -247,12 +274,12 @@ mod tests {
     #[test]
     fn run_rule_accepts_ast_grep_and_structural_rules() {
         assert_eq!(
-            run_rule("chained-dict-get"),
-            Ok(std::process::ExitCode::SUCCESS)
+            run_rule("chained-dict-get").expect("ast-grep rule should resolve"),
+            std::process::ExitCode::SUCCESS
         );
         assert_eq!(
-            run_rule("trivial-wrapper"),
-            Ok(std::process::ExitCode::SUCCESS)
+            run_rule("trivial-wrapper").expect("structural rule should resolve"),
+            std::process::ExitCode::SUCCESS
         );
     }
 
@@ -260,6 +287,6 @@ mod tests {
     fn run_rule_rejects_unknown_ids() {
         let error = run_rule("does-not-exist").expect_err("unknown rule should fail");
 
-        assert_eq!(error, "rule not found: does-not-exist");
+        assert_eq!(error.to_string(), "rule not found: does-not-exist");
     }
 }

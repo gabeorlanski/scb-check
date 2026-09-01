@@ -14,7 +14,7 @@ Per file, flagged lines are the union of:
 - Python `ast-grep` lines from bundled or extra YAML rules,
 - structural rule lines from Rust-coded structural rules over shared Python/Rust facts.
 
-Rust currently has no bundled ast-grep pattern rules. JavaScript, TypeScript, Go, Zig, Haskell, and C++ are not first-cutover scan targets.
+Rust currently has no bundled ast-grep pattern rules. JavaScript, TypeScript, Go, Zig, Haskell, and C++ are not supported scan targets.
 
 That union is intersected with `SLOC`, then divided by total `SLOC`. A line flagged by more than one source counts once.
 
@@ -82,7 +82,7 @@ CLI (`crates/scb-check`, packaged into Python wheels as a direct script for `uvx
 `violation`
 : Per-rule diagnostic type that owns immutable rule metadata, fix availability, the user-facing message, and optional fix title metadata, following the same separation Ruff uses between rule checks and diagnostics.
 
-`RuleFinding`
+`StructuralFinding`
 : Fixed-field structural finding with rule ID, severity, message, span, and subject metadata.
 
 ## Design constraints

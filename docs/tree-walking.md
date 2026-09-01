@@ -50,19 +50,19 @@ Parse failures warn and skip that file. The command fails only when no supported
 - function `sloc`,
 - erosion mass formulas.
 
-Python SLOC preserves the pre-cutover token behavior with parser data:
+Python SLOC uses parser data to preserve the established token-line semantics:
 
 1. count leaf token start lines, excluding comments;
 2. count string nodes by their start line;
 3. remove standalone plain string expression statement ranges when the literal owns the whole line span.
 
-Rust SLOC uses the same generic tree-sitter behavior established during parity work:
+Rust SLOC uses shared generic tree-sitter behavior:
 
 1. start from source lines;
 2. remove `line_comment` and `block_comment` intervals by line and column;
 3. count nonblank lines that are not punctuation-only delimiter lines.
 
-Changing SLOC is scoring-sensitive. Update parity fixtures and docs in the same change.
+Changing SLOC is scoring-sensitive. Update regression fixtures and docs in the same change.
 
 ## Functions
 
